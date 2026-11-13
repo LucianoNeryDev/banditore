@@ -10,7 +10,7 @@ import * as schema from '../../src/db/schema.js'
 const command = promisify(execFile)
 // Same pinned PostgreSQL 17 image as the dashboard's database tests.
 const image = 'postgres:17@sha256:aa90e97ee862e558111d34cfb8b2c4bec768c2b039fb791341686928560263b3'
-const label = 'leonessa-social-engine-test=postgres'
+const label = 'banditore-test=postgres'
 
 /** A disposable PostgreSQL 17 container with migrator and runtime roles. */
 export async function postgresFixture() {
@@ -27,7 +27,7 @@ export async function postgresFixture() {
     await Promise.all(pools.map(value => value.end().catch(() => undefined)))
     if (!id) return
     const inspection = JSON.parse((await command('docker', ['inspect', id])).stdout)[0]
-    if (inspection.Config.Labels['leonessa-social-engine-test'] !== 'postgres') throw new Error('Fixture ownership mismatch')
+    if (inspection.Config.Labels['banditore-test'] !== 'postgres') throw new Error('Fixture ownership mismatch')
     await command('docker', ['rm', '-fv', id])
   }
   try {

@@ -1,12 +1,12 @@
 {
-  "name": "social-engine",
+  "name": "banditore",
   "version": "0.1.0",
   "description": "Self-hosted engine that publishes and manages social media for many tenants",
   "license": "MIT",
   "author": "Luciano Nery <luciano@lucianonery.dev> (https://lucianonery.dev)",
   "repository": {
     "type": "git",
-    "url": "https://github.com/LucianoNeryDev/social-engine"
+    "url": "https://github.com/LucianoNeryDev/banditore"
   },
   "type": "module",
   "private": true,
