@@ -1,0 +1,2 @@
+ALTER TABLE "publishing_controls" ADD COLUMN "max_posts_per_channel_per_day" integer DEFAULT 10 NOT NULL;--> statement-breakpoint
+ALTER TABLE "publishing_controls" ADD CONSTRAINT "publishing_controls_daily_limit" CHECK (max_posts_per_channel_per_day between 1 and 100);

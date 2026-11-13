@@ -1,0 +1,51 @@
+{
+  "name": "social-engine",
+  "version": "0.1.0",
+  "description": "Self-hosted engine that publishes and manages social media for many tenants",
+  "license": "MIT",
+  "author": "Luciano Nery <luciano@lucianonery.dev> (https://lucianonery.dev)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LucianoNeryDev/social-engine"
+  },
+  "type": "module",
+  "private": true,
+  "packageManager": "pnpm@10.15.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "channel": "node --env-file-if-exists=.env --import tsx src/cli/channel.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node --env-file-if-exists=.env --import tsx src/cli/migrate.ts",
+    "dev": "node --env-file-if-exists=.env --import tsx --watch src/main.ts",
+    "lint": "eslint .",
+    "provider-app": "node --env-file-if-exists=.env --import tsx src/cli/provider-app.ts",
+    "start": "node dist/main.js",
+    "test": "vitest run",
+    "test:browser": "vitest run tests/*.browser.test.ts",
+    "test:db": "REQUIRE_DATABASE_TESTS=true vitest run tests/*.integration.test.ts",
+    "typecheck": "tsc --noEmit",
+    "vault": "node --env-file-if-exists=.env --import tsx src/cli/vault.ts",
+    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.45.2",
+    "h3": "1.15.11",
+    "pg": "8.23.0",
+    "playwright-core": "1.64.1",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "22.20.5",
+    "@types/pg": "8.23.1",
+    "drizzle-kit": "0.31.10",
+    "eslint": "10.10.0",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.2",
+    "vitest": "4.1.11"
+  }
+}

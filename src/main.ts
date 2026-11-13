@@ -1,0 +1,58 @@
+import { createServer } from 'node:http'
+import { toNodeListener } from 'h3'
+import { loadConfig } from './config.js'
+import type { EngineContext } from './context.js'
+import type { Platform } from './db/schema.js'
+import type { PlatformAdapter } from './platforms/types.js'
+import { createDatabase } from './db/client.js'
+import { createEngineApp } from './http/app.js'
+import { Worker } from './jobs/worker.js'
+import { publicMediaKey } from './media.js'
+import { errorFields, log, registerLogSecrets } from './log.js'
+import { RunnerClient } from './platforms/browser/runner-client.js'
+import { BrowserAdapter } from './platforms/browser/adapter.js'
+import { browserRules } from './platforms/browser/rules.js'
+import { InstagramLoginAdapter } from './platforms/instagram/adapter.js'
+import { MetaAdapter } from './platforms/meta/adapter.js'
+import { YoutubeAdapter } from './platforms/youtube/adapter.js'
+
+const config = loadConfig()
+registerLogSecrets([config.serviceToken, ...config.providerSecrets.values(), ...(config.runner ? [config.runner.token] : [])])
+const { db, pool } = createDatabase(config.databaseUrl)
+const runner = config.runner ? new RunnerClient(config.runner) : undefined
+const context: EngineContext = {
+  db,
+  ...(runner ? { runner } : {}),
+  keyring: config.keyring,
+  providerSecrets: config.providerSecrets,
+  adapters: new Map<Platform, PlatformAdapter>([
+    ['meta', new MetaAdapter({ version: config.meta.graphVersion, redirectUri: config.meta.redirectUri })],
+    ['instagram', new InstagramLoginAdapter({ version: config.meta.graphVersion, ...(config.instagram.redirectUri ? { redirectUri: config.instagram.redirectUri } : {}) })],
+    ['youtube', new YoutubeAdapter(config.google.redirectUri ? { redirectUri: config.google.redirectUri } : {})],
+    ...(runner ? Object.values(browserRules).map(rules => [rules.platform, new BrowserAdapter(runner, rules)] as const) : []),
+  ]),
+  ...(config.publicMediaUrl ? { publicMedia: { baseUrl: config.publicMediaUrl, key: publicMediaKey(config.serviceToken), lifetimeMs: 60 * 60_000 } } : {}),
+}
+
+const server = createServer(toNodeListener(createEngineApp(context, config.serviceToken)))
+// Long enough for the largest video; only the dashboard API reaches this port.
+server.requestTimeout = 15 * 60_000
+server.headersTimeout = 10_000
+server.listen(config.port, config.host, () => log('info', 'engine listening', { host: config.host, port: config.port }))
+
+const worker = new Worker(context, config.worker)
+if (config.worker.enabled) worker.start()
+
+let stopping = false
+async function shutdown(signal: string) {
+  if (stopping) return
+  stopping = true
+  log('info', 'shutting down', { signal })
+  server.close()
+  await worker.stop()
+  await pool.end()
+  process.exit(0)
+}
+process.on('SIGTERM', signal => void shutdown(signal))
+process.on('SIGINT', signal => void shutdown(signal))
+process.on('unhandledRejection', error => log('error', 'unhandled rejection', errorFields(error)))

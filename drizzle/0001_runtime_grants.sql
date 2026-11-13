@@ -1,0 +1,45 @@
+-- Grant the runtime and backup roles paired with current_database(). Fails
+-- closed on an unknown database or an elevated runtime role. Roles are created
+-- by the operator, not here. Every later migration that adds a table grants it
+-- explicitly in the same way.
+--
+-- Local:      leonessa_social_engine            / social_engine_runtime
+-- Staging:    leonessa_social_engine_staging    / social_engine_runtime_staging,    social_engine_backup_staging
+-- Production: leonessa_social_engine_production / social_engine_runtime_production, social_engine_backup_production
+DO $$
+DECLARE
+  runtime_role text;
+  backup_role text;
+  target text;
+BEGIN
+  CASE current_database()
+    WHEN 'leonessa_social_engine' THEN runtime_role := 'social_engine_runtime'; backup_role := NULL;
+    WHEN 'leonessa_social_engine_staging' THEN runtime_role := 'social_engine_runtime_staging'; backup_role := 'social_engine_backup_staging';
+    WHEN 'leonessa_social_engine_production' THEN runtime_role := 'social_engine_runtime_production'; backup_role := 'social_engine_backup_production';
+    ELSE RAISE EXCEPTION 'unexpected database %', current_database();
+  END CASE;
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = runtime_role) THEN
+    RAISE EXCEPTION 'runtime role % is missing', runtime_role;
+  END IF;
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = runtime_role AND (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb)) THEN
+    RAISE EXCEPTION 'runtime role % has elevated attributes', runtime_role;
+  END IF;
+  IF runtime_role = current_user THEN
+    RAISE EXCEPTION 'runtime role must differ from the migrator';
+  END IF;
+
+  EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', runtime_role);
+  FOREACH target IN ARRAY ARRAY['provider_apps', 'channels', 'channel_credentials', 'oauth_states', 'publishing_controls', 'media', 'jobs', 'attempts'] LOOP
+    EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON public.%I TO %I', target, runtime_role);
+  END LOOP;
+  -- The event log is append-only for the service.
+  EXECUTE format('GRANT SELECT, INSERT ON public.events TO %I', runtime_role);
+  EXECUTE format('GRANT USAGE ON SEQUENCE public.events_id_seq TO %I', runtime_role);
+
+  IF backup_role IS NOT NULL AND EXISTS (SELECT FROM pg_roles WHERE rolname = backup_role) THEN
+    EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', backup_role);
+    EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA public TO %I', backup_role);
+    EXECUTE format('GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO %I', backup_role);
+  END IF;
+END
+$$;
