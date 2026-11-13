@@ -1,4 +1,4 @@
-# Social Engine — Domain Context
+# Banditore — Domain Context
 
 ## Purpose
 

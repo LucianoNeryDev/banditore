@@ -1,6 +1,6 @@
-# Social Engine
+# Banditore
 
-Service that executes approved social media actions for many tenants. A
+Banditore is a service that executes approved social media actions for many tenants. A
 control plane (dashboard or app) owns tenants, drafts, approval and audit and
 calls this service's API; the engine never approves work and has no user
 interface.

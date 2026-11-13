@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Renamed the project to Banditore. Webhooks now send the user agent
+  `Banditore-Webhooks/1`.
+
 ## 0.1.0 — 2026-11-13
 
 First public release.

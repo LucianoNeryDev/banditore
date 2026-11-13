@@ -1,6 +1,9 @@
-# Social Engine
+# Banditore
 
-A self-hosted service that publishes and manages social media for many
+*Banditore* is Italian for town crier: the person who walked into the piazza
+and announced the news to everyone at once.
+
+Banditore is a self-hosted service that publishes and manages social media for many
 clients at once. It posts, reads statistics and comments, sends approved
 replies and direct messages, and tells your applications what happened through
 signed webhooks.
