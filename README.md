@@ -1,3 +1,5 @@
+<img src="docs/brand/banditore-icon.svg" alt="" width="96" height="96">
+
 # Banditore
 
 *Banditore* is Italian for town crier: the person who walked into the piazza
