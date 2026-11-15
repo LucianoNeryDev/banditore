@@ -18,12 +18,12 @@ function adapter(replies: Array<() => Promise<Response>>, options = { pollMs: 0,
     if (!reply) throw new Error(`Unexpected call ${String(url)}`)
     return reply()
   }) as typeof fetch
-  return { calls, adapter: new BrowserAdapter(new RunnerClient({ url: 'http://100.64.0.4:3430', token: 't'.repeat(40), fetch: fetcher }), rules, options) }
+  return { calls, adapter: new BrowserAdapter(new RunnerClient({ url: 'http://100.64.1.4:3430', token: 't'.repeat(40), fetch: fetcher }), rules, options) }
 }
 
 const input = (overrides: Partial<PublishInput> = {}): PublishInput => ({
-  attemptId: 'attempt-1', channel: { id: 'c', kind: 'tiktok_account', externalId: 'leonessa.digital' }, token: '',
-  browserAccount: { id: accountId, handle: 'leonessa.digital', sealed: { ephemeralPublicKey: Buffer.alloc(32, 1), nonce: Buffer.alloc(12, 2), ciphertext: Buffer.alloc(40, 3) } },
+  attemptId: 'attempt-1', channel: { id: 'c', kind: 'tiktok_account', externalId: 'bottega.digitale' }, token: '',
+  browserAccount: { id: accountId, handle: 'bottega.digitale', sealed: { ephemeralPublicKey: Buffer.alloc(32, 1), nonce: Buffer.alloc(12, 2), ciphertext: Buffer.alloc(40, 3) } },
   content: 'Ciao Brescia', settings: {},
   media: [{ ...mediaFile('m', 'a.mp4', 'video/mp4'), publicUrl: 'https://dash-api.example.com/api/social/media/org/m?expires=1&signature=s' }],
   ...overrides,
@@ -42,14 +42,14 @@ describe('TikTok through the runner', () => {
   it('submits the sealed login by attempt, beats while a person takes over, and returns the receipt', async () => {
     const { adapter: tiktok, calls } = adapter([
       json(view('queued'), 202), json(view('needs_human', { takeover: { reason: 'captcha', since: '' } })), json(view('running', { visible: true })),
-      json(view('succeeded', { visible: true, receipt: { externalId: '7400000000000000000', url: 'https://www.tiktok.com/@leonessa.digital/video/7400000000000000000' } })),
+      json(view('succeeded', { visible: true, receipt: { externalId: '7400000000000000000', url: 'https://www.tiktok.com/@bottega.digitale/video/7400000000000000000' } })),
     ])
     const heartbeat = vi.fn().mockResolvedValue(undefined)
-    expect(await tiktok.publish(null, input({ heartbeat }))).toEqual({ kind: 'published', externalId: '7400000000000000000', url: 'https://www.tiktok.com/@leonessa.digital/video/7400000000000000000' })
+    expect(await tiktok.publish(null, input({ heartbeat }))).toEqual({ kind: 'published', externalId: '7400000000000000000', url: 'https://www.tiktok.com/@bottega.digitale/video/7400000000000000000' })
     expect(heartbeat).toHaveBeenCalledTimes(3)
     const body = JSON.parse(String(calls[0]!.init!.body))
-    expect(body).toMatchObject({ actionId: 'attempt-1', kind: 'publish_post', account: { id: accountId, platform: 'tiktok', handle: 'leonessa.digital' },
-      target: { kind: 'tiktok_account', externalId: 'leonessa.digital' }, settings: {} })
+    expect(body).toMatchObject({ actionId: 'attempt-1', kind: 'publish_post', account: { id: accountId, platform: 'tiktok', handle: 'bottega.digitale' },
+      target: { kind: 'tiktok_account', externalId: 'bottega.digitale' }, settings: {} })
     expect(body.account.sealed.ciphertext).toBe(Buffer.alloc(40, 3).toString('base64'))
     expect((calls[0]!.init!.headers as Record<string, string>).Authorization).toBe(`Bearer ${'t'.repeat(40)}`)
   })
@@ -76,7 +76,7 @@ describe('TikTok through the runner', () => {
     const reconcile = { attemptId: 'attempt-1', channel: input().channel, token: '', content: 'Ciao', settings: {}, since: new Date(), excludeExternalIds: [] }
     const done = adapter([json(view('succeeded', { receipt: { externalId: '74' } }))])
     expect(await done.adapter.reconcile(null, reconcile)).toEqual({ kind: 'published', externalId: '74' })
-    expect(done.calls[0]!.url).toBe('http://100.64.0.4:3430/v1/actions?actionId=attempt-1')
+    expect(done.calls[0]!.url).toBe('http://100.64.1.4:3430/v1/actions?actionId=attempt-1')
     expect(await adapter([json({ error: 'not_found' }, 404)]).adapter.reconcile(null, reconcile)).toEqual({ kind: 'not_found' })
     expect(await adapter([json(view('failed'))]).adapter.reconcile(null, reconcile)).toEqual({ kind: 'not_found' })
     expect((await adapter([json(view('needs_human'))]).adapter.reconcile(null, reconcile)).kind).toBe('ambiguous')
@@ -103,13 +103,13 @@ describe('other browser platforms', () => {
 
   it('needs a board and one medium on Pinterest, a subreddit and title on Reddit', () => {
     const pinterest = rulesFor('pinterest')
-    expect(() => pinterest.validateSettings('pinterest_account', { board: 'Siti web', link: 'https://leonessadigital.com/blog' }, [image])).not.toThrow()
+    expect(() => pinterest.validateSettings('pinterest_account', { board: 'Siti web', link: 'https://bottega.example/blog' }, [image])).not.toThrow()
     expect(() => pinterest.validateSettings('pinterest_account', { board: 'Siti web' }, [])).toThrow('need an image')
     expect(() => pinterest.validateSettings('pinterest_account', {}, [image])).toThrow('Invalid Pinterest settings: board')
     expect(() => pinterest.validateSettings('pinterest_account', { board: 'x', link: 'javascript:alert(1)' }, [image])).toThrow('link')
     const reddit = rulesFor('reddit')
     expect(() => reddit.validateSettings('reddit_account', { subreddit: 'brescia', title: 'Ciao' }, [])).not.toThrow()
-    expect(() => reddit.validateSettings('reddit_account', { subreddit: 'u_leonessadigital', title: 'Ciao' }, [image, image])).not.toThrow()
+    expect(() => reddit.validateSettings('reddit_account', { subreddit: 'u_bottegadigitale', title: 'Ciao' }, [image, image])).not.toThrow()
     expect(() => reddit.validateSettings('reddit_account', { subreddit: 'r/brescia', title: 'Ciao' }, [])).toThrow('subreddit')
     expect(() => reddit.validateSettings('reddit_account', { subreddit: 'brescia' }, [])).toThrow('title')
   })
@@ -122,7 +122,7 @@ describe('other browser platforms', () => {
 
   it('sends the channel target and the parsed settings to the runner', async () => {
     const { adapter: reddit, calls } = adapter([json(view('succeeded', { receipt: { externalId: 't3_abc', url: 'https://www.reddit.com/r/brescia/comments/abc/ciao/' } }), 202)], undefined, browserRules.reddit)
-    const result = await reddit.publish(null, input({ channel: { id: 'c', kind: 'reddit_account', externalId: 'leonessadigital' }, media: [], settings: { subreddit: 'brescia', title: 'Ciao' } }))
+    const result = await reddit.publish(null, input({ channel: { id: 'c', kind: 'reddit_account', externalId: 'bottegadigitale' }, media: [], settings: { subreddit: 'brescia', title: 'Ciao' } }))
     expect(result).toEqual({ kind: 'published', externalId: 't3_abc', url: 'https://www.reddit.com/r/brescia/comments/abc/ciao/' })
     expect(JSON.parse(String(calls[0]!.init!.body))).toMatchObject({ account: { platform: 'reddit' }, target: { kind: 'reddit_account' }, settings: { subreddit: 'brescia', title: 'Ciao' } })
     expect(await reddit.publish(null, input({ media: [], settings: {} }))).toMatchObject({ kind: 'failed', retryable: false, code: 'invalid_settings' })

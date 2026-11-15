@@ -493,7 +493,7 @@ not guaranteed. The Standard Webhooks libraries do all three.
 - A `410 Gone` disables the webhook at once (`gone`), and so does failing
   every attempt for three days (`failing`).
 - The engine connects only to public addresses: a host that resolves to a
-  loopback, private, link-local, tailnet (100.64.0.0/10) or other reserved
+  loopback, private, link-local, shared CGNAT (100.64.0.0/10) or other reserved
   address is refused on every attempt.
 - Deliveries are kept 30 days.
 

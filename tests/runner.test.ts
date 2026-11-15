@@ -9,10 +9,10 @@ import { totp } from '../src/runner/totp.js'
 
 const runner = runnerKeyPair()
 const accountId = '6b1f4c0e-8a52-4d3c-9b7e-2f1a3c4d5e6f'
-const sealed = sealSecret(runner.publicKey, accountId, JSON.stringify({ username: 'leonessa.digital', password: 'pw' }))
+const sealed = sealSecret(runner.publicKey, accountId, JSON.stringify({ username: 'bottega.digitale', password: 'pw' }))
 const request = (overrides: Partial<ActionRequest> = {}): ActionRequest => ({
   actionId: 'attempt-1', kind: 'publish_post', content: 'Ciao Brescia', media: [], settings: {},
-  account: { id: accountId, platform: 'tiktok', handle: 'leonessa.digital', sealed: {
+  account: { id: accountId, platform: 'tiktok', handle: 'bottega.digitale', sealed: {
     ephemeralPublicKey: sealed.ephemeralPublicKey.toString('base64'), nonce: sealed.nonce.toString('base64'), ciphertext: sealed.ciphertext.toString('base64') } },
   ...overrides,
 })
@@ -38,10 +38,10 @@ describe('runner actions', () => {
     const store = new ActionStore(file())
     const action = store.submit(request())
     const { instance, cleanup } = executor(store, async (context) => {
-      expect(context.secret).toEqual({ username: 'leonessa.digital', password: 'pw' })
+      expect(context.secret).toEqual({ username: 'bottega.digitale', password: 'pw' })
       expect(context.files).toEqual(['/tmp/a.mp4'])
       context.visible()
-      return { externalId: '7400000000000000000', url: 'https://www.tiktok.com/@leonessa.digital/video/7400000000000000000' }
+      return { externalId: '7400000000000000000', url: 'https://www.tiktok.com/@bottega.digitale/video/7400000000000000000' }
     })
     await instance.tick()
     expect(store.get(action.id)).toMatchObject({ state: 'succeeded', receipt: { externalId: '7400000000000000000' } })

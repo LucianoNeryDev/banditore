@@ -14,7 +14,7 @@ const command = promisify(execFile)
 describe('webhook addresses', () => {
   it('reaches public addresses only', () => {
     for (const address of ['8.8.8.8', '1.1.1.1', '2606:4700:4700::1111']) expect(isPublicAddress(address)).toBe(true)
-    for (const address of ['127.0.0.1', '10.1.2.3', '172.16.0.1', '192.168.1.1', '100.64.0.4', '169.254.169.254', '0.0.0.0', '224.0.0.1',
+    for (const address of ['127.0.0.1', '10.1.2.3', '172.16.0.1', '192.168.1.1', '100.64.1.4', '169.254.169.254', '0.0.0.0', '224.0.0.1',
       '::1', '::', 'fd7a:115c:a1e0::1', 'fe80::1', '::ffff:127.0.0.1', '::ffff:8.8.8.8', '64:ff9b::a00:1', '2002:a00:1::1', 'not-an-ip']) {
       expect(isPublicAddress(address), address).toBe(false)
     }
@@ -26,7 +26,7 @@ describe('webhook addresses', () => {
     expect(webhookUrlProblem('http://hooks.example.com/')).toBe('must be HTTPS')
     expect(webhookUrlProblem('https://user:pass@hooks.example.com/')).toBe('must not carry credentials')
     expect(webhookUrlProblem('https://hooks.example.com/#x')).toBe('must not have a fragment')
-    for (const url of ['https://127.0.0.1/', 'https://[::1]/', 'https://100.64.0.4:3430/', 'https://[::ffff:10.0.0.1]/']) {
+    for (const url of ['https://127.0.0.1/', 'https://[::1]/', 'https://100.64.1.4:3430/', 'https://[::ffff:10.0.0.1]/']) {
       expect(webhookUrlProblem(url), url).toBe('must not point at a private address')
     }
     for (const url of ['https://localhost/', 'https://o1/', 'https://p1.tail.ts.net/', 'https://router.lan/', 'https://x.internal/']) {

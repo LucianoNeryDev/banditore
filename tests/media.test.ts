@@ -37,11 +37,11 @@ describe('public media URLs', () => {
   const config = { baseUrl: 'https://dash-api.example.com/api/social/media/', key, lifetimeMs: 3_600_000 }
 
   it('signs the organization, media and expiry', () => {
-    const url = new URL(publicMediaUrl(config, 'agency-leonessa-digital', '0b0f7c3e-4b7e-4c11-9a51-8f1c2a7a0c11', new Date('2026-10-24T10:00:00Z')))
-    expect(url.pathname).toBe('/api/social/media/agency-leonessa-digital/0b0f7c3e-4b7e-4c11-9a51-8f1c2a7a0c11')
+    const url = new URL(publicMediaUrl(config, 'agency-bottega-digitale', '0b0f7c3e-4b7e-4c11-9a51-8f1c2a7a0c11', new Date('2026-10-24T10:00:00Z')))
+    expect(url.pathname).toBe('/api/social/media/agency-bottega-digitale/0b0f7c3e-4b7e-4c11-9a51-8f1c2a7a0c11')
     const expires = Number(url.searchParams.get('expires'))
     expect(expires).toBe(Date.parse('2026-10-24T11:00:00Z') / 1000)
-    expect(url.searchParams.get('signature')).toBe(mediaSignature(key, 'agency-leonessa-digital', '0b0f7c3e-4b7e-4c11-9a51-8f1c2a7a0c11', expires))
+    expect(url.searchParams.get('signature')).toBe(mediaSignature(key, 'agency-bottega-digitale', '0b0f7c3e-4b7e-4c11-9a51-8f1c2a7a0c11', expires))
     expect(mediaSignature(key, 'another-org', '0b0f7c3e-4b7e-4c11-9a51-8f1c2a7a0c11', expires)).not.toBe(url.searchParams.get('signature'))
   })
 

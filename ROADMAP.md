@@ -3,7 +3,7 @@
 ## Done
 
 - Publish approved dashboard posts to Facebook Pages and Instagram through a
-  Leonessa-owned Meta app, with pause, cancel and receipts.
+  operator-owned Meta app, with pause, cancel and receipts.
 - Channel groups and automations in the dashboard: new blog articles become
   posts, and drafts come from a brand profile, with review or automatic
   approval.

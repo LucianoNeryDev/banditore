@@ -30,7 +30,7 @@ const unreadable = () => new Response('not json', { status: 200 })
 
 const metaApp: ResolvedProviderApp = { id: 'meta-test', platform: 'meta', externalAppId: '111', secret: 'app-secret-123', settings: { configId: '222' } }
 const googleApp: ResolvedProviderApp = { id: 'google-test', platform: 'youtube', externalAppId: '123-abc.apps.googleusercontent.com', secret: 'google-secret-123', settings: {} }
-const instagramApp: ResolvedProviderApp = { id: 'instagram-test', platform: 'instagram', externalAppId: '1582792782997136', secret: 'ig-secret-123', settings: {} }
+const instagramApp: ResolvedProviderApp = { id: 'instagram-test', platform: 'instagram', externalAppId: '1000000000000202', secret: 'ig-secret-123', settings: {} }
 
 const meta = (replies: Reply[]) => {
   const { calls, fetcher } = recorder(replies)
@@ -45,9 +45,9 @@ const youtube = (replies: Reply[]) => {
   return { calls, adapter: new YoutubeAdapter({ redirectUri: 'https://dash-api.example.com/yt', fetch: fetcher }) }
 }
 
-const page = { id: 'c1', kind: 'facebook_page' as const, externalId: '1288534674353714' }
-const igAccount = { id: 'c2', kind: 'instagram_account' as const, externalId: '17841400000000000', handle: 'leonessa' }
-const ytChannel = { id: 'c3', kind: 'youtube_channel' as const, externalId: 'UC4LhENFUrkAcWqE7K-iFj5A' }
+const page = { id: 'c1', kind: 'facebook_page' as const, externalId: '1000000000000101' }
+const igAccount = { id: 'c2', kind: 'instagram_account' as const, externalId: '17841400000000000', handle: 'bottega' }
+const ytChannel = { id: 'c3', kind: 'youtube_channel' as const, externalId: 'UCexampleChannel0000001a' }
 const replyInput = (channel: ReplyInput['channel'], overrides: Partial<ReplyInput> = {}): ReplyInput => ({
   channel, token: 'token-abc', postExternalId: '1_2', targetExternalId: '1_2_3', text: 'Grazie mille!', ...overrides })
 const since = new Date('2030-01-01T10:00:00Z')
@@ -145,7 +145,7 @@ describe('Meta replies', () => {
     expect(calls[0]!.url.pathname).toBe('/v26.0/17900/replies')
     expect(calls[0]!.url.searchParams.get('fields')).toBe('id,text,timestamp,username,user')
     expect(calls[0]!.url.searchParams.get('limit')).toBe('50')
-    const byName = meta([json({ data: [{ id: '17999', text: 'Grazie mille!', timestamp: '2030-01-01T10:01:00+0000', username: 'Leonessa' }] })])
+    const byName = meta([json({ data: [{ id: '17999', text: 'Grazie mille!', timestamp: '2030-01-01T10:01:00+0000', username: 'Bottega' }] })])
     expect(await byName.adapter.findReply(metaApp, findInput(igAccount))).toMatchObject({ kind: 'found', externalId: '17999' })
   })
 
@@ -178,7 +178,7 @@ describe('Meta replies', () => {
     const { adapter } = meta([
       json({ access_token: 'short-user' }),
       json({ access_token: 'long-user', expires_in: 5_184_000 }),
-      json({ data: [{ id: '1', name: 'Leonessa', access_token: 'page-1', tasks: ['CREATE_CONTENT'], instagram_business_account: { id: '17841', username: 'leonessa' } },
+      json({ data: [{ id: '1', name: 'Bottega', access_token: 'page-1', tasks: ['CREATE_CONTENT'], instagram_business_account: { id: '17841', username: 'bottega' } },
         { id: '3', name: 'Client', access_token: 'page-3', tasks: ['CREATE_CONTENT'] }] }),
       json({ data: { scopes: ['pages_manage_posts', 'pages_manage_engagement'], granular_scopes: [{ scope: 'pages_manage_engagement', target_ids: ['1'] }] } }),
     ])
@@ -190,7 +190,7 @@ describe('Meta replies', () => {
     const { adapter, calls } = meta([
       json({ access_token: 'short-user' }),
       json({ access_token: 'long-user', expires_in: 5_184_000 }),
-      json({ data: [{ id: '1', name: 'Leonessa', access_token: 'page-1', tasks: ['CREATE_CONTENT'] },
+      json({ data: [{ id: '1', name: 'Bottega', access_token: 'page-1', tasks: ['CREATE_CONTENT'] },
         { id: '3', name: 'Client', access_token: 'page-3', tasks: ['CREATE_CONTENT'] },
         { id: '4', name: 'Other', access_token: 'page-4', tasks: ['CREATE_CONTENT'] }] }),
       json({ data: { scopes: ['pages_manage_posts', 'pages_messaging'], granular_scopes: [{ scope: 'pages_messaging', target_ids: ['1', '3'] }] } }),
@@ -222,7 +222,7 @@ describe('Instagram login replies', () => {
       { access_token: 'short', user_id: 17841, permissions: ['instagram_business_basic', 'instagram_business_manage_comments'] },
     ]) {
       const { adapter } = instagramLogin([json(exchange), json({ access_token: 'IGAA-long', token_type: 'bearer', expires_in: 5_183_944 }),
-        json({ user_id: '17841', username: 'orbvora' })])
+        json({ user_id: '17841', username: 'arcadegames' })])
       const [account] = await adapter.finishConnect(instagramApp, 'code')
       expect(account).toMatchObject({ externalId: '17841', token: 'IGAA-long', grantedScopes: ['instagram_business_basic', 'instagram_business_manage_comments'] })
     }
@@ -236,7 +236,7 @@ describe('YouTube replies', () => {
     expect(defaultYoutubeScopes).toContain(youtubeReplyScope)
     const { adapter } = youtube([
       json({ access_token: 'ya29.new', expires_in: 3599, refresh_token: '1//refresh', scope: `https://www.googleapis.com/auth/youtube.upload ${youtubeReplyScope}` }),
-      json({ items: [{ id: ytChannel.externalId, snippet: { title: 'OrbVora' } }] }),
+      json({ items: [{ id: ytChannel.externalId, snippet: { title: 'Arcade Games' } }] }),
       json({ access_token: 'ya29.renewed', expires_in: 3599, scope: 'https://www.googleapis.com/auth/youtube.upload' }),
     ])
     expect((await adapter.finishConnect(googleApp, 'code'))[0]!.grantedScopes).toEqual(['https://www.googleapis.com/auth/youtube.upload', youtubeReplyScope])
@@ -248,8 +248,8 @@ describe('YouTube replies', () => {
   it('inserts a reply under the top-level comment and links to it on the video', async () => {
     const { adapter, calls } = youtube([json({ id: 'Ug1.r9', snippet: { textOriginal: 'Grazie mille!', publishedAt: '2030-01-01T10:00:00Z' } })])
     expect(adapter.replyRules('youtube_channel')).toEqual({ permission: youtubeReplyScope, maxLength: 10_000 })
-    expect(await adapter.reply(googleApp, replyInput(ytChannel, { postExternalId: 'tNnu5T9_KjU', targetExternalId: 'Ug1' })))
-      .toEqual({ kind: 'sent', externalId: 'Ug1.r9', url: 'https://www.youtube.com/watch?v=tNnu5T9_KjU&lc=Ug1.r9' })
+    expect(await adapter.reply(googleApp, replyInput(ytChannel, { postExternalId: 'vid00000001', targetExternalId: 'Ug1' })))
+      .toEqual({ kind: 'sent', externalId: 'Ug1.r9', url: 'https://www.youtube.com/watch?v=vid00000001&lc=Ug1.r9' })
     expect(calls[0]!.method).toBe('POST')
     expect(calls[0]!.url.href).toBe('https://www.googleapis.com/youtube/v3/comments?part=snippet')
     expect(JSON.parse(String(calls[0]!.body))).toEqual({ snippet: { parentId: 'Ug1', textOriginal: 'Grazie mille!' } })
@@ -283,8 +283,8 @@ describe('YouTube replies', () => {
     const { adapter, calls } = youtube([json({ nextPageToken: 'p2', items: [reply('Ug1.a', 'UCother0000000000000000000')] }),
       json({ items: [reply('Ug1.b', ytChannel.externalId, { textOriginal: 'Grazie  mille!', textDisplay: 'Grazie mille! (edited)' })] })])
     let spent = 0
-    expect(await adapter.findReply(googleApp, findInput(ytChannel, { postExternalId: 'tNnu5T9_KjU', targetExternalId: 'Ug1', spendCall: () => { spent++ } })))
-      .toEqual({ kind: 'found', externalId: 'Ug1.b', url: 'https://www.youtube.com/watch?v=tNnu5T9_KjU&lc=Ug1.b' })
+    expect(await adapter.findReply(googleApp, findInput(ytChannel, { postExternalId: 'vid00000001', targetExternalId: 'Ug1', spendCall: () => { spent++ } })))
+      .toEqual({ kind: 'found', externalId: 'Ug1.b', url: 'https://www.youtube.com/watch?v=vid00000001&lc=Ug1.b' })
     expect(spent).toBe(1)
     expect(Object.fromEntries(calls[0]!.url.searchParams)).toEqual({ part: 'snippet', parentId: 'Ug1', maxResults: '100', textFormat: 'plainText' })
     expect(calls[1]!.url.searchParams.get('pageToken')).toBe('p2')

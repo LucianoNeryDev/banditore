@@ -119,7 +119,7 @@ describe.skipIf(!required)('comment replies on PostgreSQL 17', { timeout: 30_000
     authorHandle: null, text: `text ${id}`, likeCount: 0, replyCount: 0, publishedAt: now, url: null, fromChannel: false, ...extra })
 
   async function connect(platform = meta, options: { organizationId?: string, grantedScopes?: string[], externalId?: string } = {}) {
-    platform.accounts = [{ kind: platform === youtube ? 'youtube_channel' : 'facebook_page', externalId: options.externalId ?? `acct-${randomUUID()}`, name: 'Leonessa',
+    platform.accounts = [{ kind: platform === youtube ? 'youtube_channel' : 'facebook_page', externalId: options.externalId ?? `acct-${randomUUID()}`, name: 'Bottega',
       token: 'token-secret', tokenExpiresAt: null, ...(options.grantedScopes ? { grantedScopes: options.grantedScopes } : {}) }]
     const organizationId = options.organizationId ?? org
     const { state } = await startConnect(context, organizationId, platform === youtube ? 'google-agency' : 'meta-agency')
@@ -207,7 +207,7 @@ describe.skipIf(!required)('comment replies on PostgreSQL 17', { timeout: 30_000
     await db.update(channels).set({ status: 'needs_reauth' }).where(eq(channels.id, channel.id))
     await expect(submitReply(context, org, input)).rejects.toMatchObject({ code: 'channel_inactive' })
 
-    const account = await putBrowserAccount(db, runnerKeyPair().publicKey, { organizationId: org, platform: 'reddit', handle: 'leonessa' }, { username: 'u', password: 'p' })
+    const account = await putBrowserAccount(db, runnerKeyPair().publicKey, { organizationId: org, platform: 'reddit', handle: 'bottega' }, { username: 'u', password: 'p' })
     const browserId = (await linkBrowserChannel(db, org, account.id)).channelId
     const [row] = await db.select().from(jobs).where(eq(jobs.id, job.id))
     const browserJob = randomUUID()
@@ -230,7 +230,7 @@ describe.skipIf(!required)('comment replies on PostgreSQL 17', { timeout: 30_000
     const [check] = await db.select().from(responseChecks).where(eq(responseChecks.jobId, job.id))
     expect(check!.nextCheckAt.getTime()).toBeLessThanOrEqual(now.getTime() + 30_000)
 
-    meta.comments = [...meta.comments, comment('reply-1', { parentExternalId: 'c1', fromChannel: true, authorName: 'Leonessa' })]
+    meta.comments = [...meta.comments, comment('reply-1', { parentExternalId: 'c1', fromChannel: true, authorName: 'Bottega' })]
     advance(30_000)
     await collectDueResponses(context)
     const { responses } = await readResponses(context, org, { jobIds: [job.id], limit: 50 })

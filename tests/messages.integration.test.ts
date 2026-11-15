@@ -126,7 +126,7 @@ describe.skipIf(!required)('direct messages on PostgreSQL 17', { timeout: 60_000
   const advance = (ms: number) => { now = new Date(now.getTime() + ms) }
 
   async function connect(options: { organizationId?: string, grantedScopes?: string[], externalId?: string } = {}) {
-    meta.accounts = [{ kind: 'facebook_page', externalId: options.externalId ?? String(Date.now()) + String(Math.floor(Math.random() * 1e6)), name: 'Leonessa',
+    meta.accounts = [{ kind: 'facebook_page', externalId: options.externalId ?? String(Date.now()) + String(Math.floor(Math.random() * 1e6)), name: 'Bottega',
       token: 'token-secret', tokenExpiresAt: null, ...(options.grantedScopes ? { grantedScopes: options.grantedScopes } : {}) }]
     const organizationId = options.organizationId ?? org
     const { state } = await startConnect(context, organizationId, 'meta-agency')

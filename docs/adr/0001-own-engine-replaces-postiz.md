@@ -5,7 +5,7 @@
 
 ## Context
 
-The Leonessa dashboard already owns social drafts, revisions, approval, pause
+The dashboard already owns social drafts, revisions, approval, pause
 and audit. Self-hosted Postiz v2.25.0 was adopted only as the execution layer:
 it holds channel connections and fires scheduled posts.
 
