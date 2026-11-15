@@ -1,6 +1,22 @@
 import { z } from 'zod'
 
 const loopbackHosts = ['127.0.0.1', '::1', 'localhost']
+/**
+ * The control plane's events URL: HTTPS to any host, or plain HTTP to a
+ * loopback address only (the dashboard on the same machine). Unlike tenant
+ * webhooks, private hosts are allowed: the operator sets this, not a tenant.
+ */
+export function controlPlaneUrlProblem(value: string): string | null {
+  let url: URL
+  try { url = new URL(value) } catch { return 'not a URL' }
+  if (url.username || url.password) return 'must not carry credentials'
+  if (url.hash) return 'must not have a fragment'
+  if (url.protocol === 'https:') return null
+  const host = url.hostname.replace(/^\[|\]$/g, '')
+  if (url.protocol === 'http:' && (loopbackHosts.includes(host) || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host))) return null
+  return 'must be https, or http on a loopback address'
+}
+
 const singleLine = z.string().min(1).refine(value => !/[\r\n]/.test(value), 'must be a single line')
 
 const keyringSchema = z.record(z.string().regex(/^[a-z0-9-]{1,32}$/), z.string())
@@ -47,6 +63,12 @@ const environmentSchema = z.object({
   // Optional browser runner. Browser channels (TikTok, X, LinkedIn, Threads, Pinterest, Reddit) are unavailable without it.
   RUNNER_URL: z.url().refine(value => ['http:', 'https:'].includes(new URL(value).protocol)).optional(),
   RUNNER_TOKEN: singleLine.refine(value => value.length >= 32, 'runner token must be at least 32 characters').optional(),
+  // AI answers (ADR 0004). Without Anthropic no drafts are written; without Liquid every decision is `skipped` (a person decides).
+  ANTHROPIC_API_KEY: z.preprocess(value => value === '' ? undefined : value, singleLine.optional()),
+  LIQUID_API_KEY: z.preprocess(value => value === '' ? undefined : value, singleLine.optional()),
+  // Where the control plane hears that a pull is due (ADR 0005). Unset: no events, the control plane polls.
+  CONTROL_PLANE_EVENTS_URL: z.preprocess(value => value === '' ? undefined : value, z.url().refine(value => controlPlaneUrlProblem(value) === null,
+    'must be https, or http on a loopback address, without credentials or fragment').optional()),
   WORKER_ENABLED: z.enum(['true', 'false']).default('true').transform(value => value === 'true'),
   WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(2),
   WORKER_POLL_MS: z.coerce.number().int().min(250).max(60_000).default(5_000),
@@ -75,6 +97,9 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     instagram: { redirectUri: value.INSTAGRAM_REDIRECT_URI },
     publicMediaUrl: value.PUBLIC_MEDIA_URL,
     runner: value.RUNNER_URL && value.RUNNER_TOKEN ? { url: value.RUNNER_URL, token: value.RUNNER_TOKEN } : undefined,
+    anthropicApiKey: value.ANTHROPIC_API_KEY,
+    liquidApiKey: value.LIQUID_API_KEY,
+    controlPlaneEventsUrl: value.CONTROL_PLANE_EVENTS_URL,
     worker: { enabled: value.WORKER_ENABLED, concurrency: value.WORKER_CONCURRENCY, pollMs: value.WORKER_POLL_MS },
   }
 }

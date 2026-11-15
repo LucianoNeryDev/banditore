@@ -15,9 +15,13 @@ import { browserRules } from './platforms/browser/rules.js'
 import { InstagramLoginAdapter } from './platforms/instagram/adapter.js'
 import { MetaAdapter } from './platforms/meta/adapter.js'
 import { YoutubeAdapter } from './platforms/youtube/adapter.js'
+import { LiquidDecisionModel } from './answering/decision.js'
+import { AnthropicDraftModel } from './answering/drafting.js'
+import { ControlEventSender, controlEventKey } from './control-events.js'
 
 const config = loadConfig()
-registerLogSecrets([config.serviceToken, ...config.providerSecrets.values(), ...(config.runner ? [config.runner.token] : [])])
+registerLogSecrets([config.serviceToken, ...config.providerSecrets.values(), ...(config.runner ? [config.runner.token] : []),
+  ...(config.anthropicApiKey ? [config.anthropicApiKey] : []), ...(config.liquidApiKey ? [config.liquidApiKey] : [])])
 const { db, pool } = createDatabase(config.databaseUrl)
 const runner = config.runner ? new RunnerClient(config.runner) : undefined
 const context: EngineContext = {
@@ -31,6 +35,8 @@ const context: EngineContext = {
     ['youtube', new YoutubeAdapter(config.google.redirectUri ? { redirectUri: config.google.redirectUri } : {})],
     ...(runner ? Object.values(browserRules).map(rules => [rules.platform, new BrowserAdapter(runner, rules)] as const) : []),
   ]),
+  ...(config.liquidApiKey ? { decisionModel: new LiquidDecisionModel({ apiKey: config.liquidApiKey }) } : {}),
+  ...(config.anthropicApiKey ? { draftModel: new AnthropicDraftModel({ apiKey: config.anthropicApiKey }) } : {}),
   ...(config.publicMediaUrl ? { publicMedia: { baseUrl: config.publicMediaUrl, key: publicMediaKey(config.serviceToken), lifetimeMs: 60 * 60_000 } } : {}),
 }
 
@@ -42,6 +48,11 @@ server.listen(config.port, config.host, () => log('info', 'engine listening', { 
 
 const worker = new Worker(context, config.worker)
 if (config.worker.enabled) worker.start()
+// Events to the control plane, after the commits that queued them (ADR 0005).
+const controlEvents = config.controlPlaneEventsUrl
+  ? new ControlEventSender(context, { url: config.controlPlaneEventsUrl, key: controlEventKey(config.serviceToken) }) : undefined
+controlEvents?.start()
+log('info', 'answering', { decisionModel: Boolean(context.decisionModel), draftModel: Boolean(context.draftModel), controlEvents: Boolean(controlEvents) })
 
 let stopping = false
 async function shutdown(signal: string) {
@@ -50,6 +61,7 @@ async function shutdown(signal: string) {
   log('info', 'shutting down', { signal })
   server.close()
   await worker.stop()
+  await controlEvents?.stop()
   await pool.end()
   process.exit(0)
 }

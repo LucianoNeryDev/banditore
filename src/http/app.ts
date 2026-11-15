@@ -20,6 +20,9 @@ import { cancelReply, listReplies, replySubmissionSchema, resolveReply, submitRe
 import { getConversation, listConversationMessages, listConversations, notifyMeta, requestConversationSync } from '../conversations.js'
 import { cancelMessage, listOutgoingMessages, messageSubmissionSchema, resolveMessage, submitMessage } from '../messages.js'
 import { outgoingMessageStates } from '../db/schema.js'
+import { answeringPutSchema, getAnswering, putAnswering } from '../answering/settings.js'
+import { ackDraftOutbox, listDraftOutbox } from '../answering/drafts.js'
+import { reviseDraft, reviseSchema } from '../answering/revise.js'
 import { checkBrowserLogin, listBrowserAccounts, startBrowserLogin } from '../vault.js'
 import { createWebhook, deleteWebhook, listDeliveries, listWebhooks, redeliver, rotateWebhookSecret, testWebhook, updateWebhook, webhookCreateSchema,
   webhookUpdateSchema } from '../webhooks.js'
@@ -205,6 +208,20 @@ export function createEngineApp(context: EngineContext, serviceToken: string) {
     const body = z.strictObject({ outcome: z.enum(['sent', 'not_sent']) }).parse(await readJson(event))
     return resolveMessage(context, org, key, body.outcome)
   }))
+  // AI answers (ADR 0004): the tenant's answering settings, the draft outbox the dashboard pulls, and revisions a person asks for.
+  router.get('/v1/tenants/:org/answering', authed(async event => getAnswering(context, organizationId.parse(getRouterParam(event, 'org')))))
+  router.put('/v1/tenants/:org/answering', authed(async event => putAnswering(context, organizationId.parse(getRouterParam(event, 'org')),
+    answeringPutSchema.parse(await readJson(event)))))
+  router.get('/v1/drafts/outbox', authed(async event => {
+    const query = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50) }).parse(getQuery(event))
+    return listDraftOutbox(context, query.limit)
+  }))
+  router.post('/v1/drafts/outbox/ack', authed(async event => {
+    const body = z.strictObject({ ids: z.array(z.uuid()).min(1).max(200) }).parse(await readJson(event))
+    return ackDraftOutbox(context, [...new Set(body.ids)])
+  }))
+  router.post('/v1/tenants/:org/drafts/revise', authed(async event => reviseDraft(context, organizationId.parse(getRouterParam(event, 'org')),
+    reviseSchema.parse(await readJson(event)))))
   // Webhooks: the tenant's endpoints, told of published posts, moving numbers and new comments.
   router.get('/v1/tenants/:org/webhooks', authed(async event => ({ webhooks: await listWebhooks(context, organizationId.parse(getRouterParam(event, 'org'))) })))
   router.post('/v1/tenants/:org/webhooks', authed(async event => {

@@ -14,6 +14,7 @@ import { repliesIntervalMs, runReplies, sweepReplies } from '../replies.js'
 import { collectDueConversations, conversationsIntervalMs } from '../conversations.js'
 import { messagesIntervalMs, runMessages, sweepMessages } from '../messages.js'
 import { applyRetention, retentionIntervalMs } from '../retention.js'
+import { answeringIntervalMs, runAnswering } from '../answering/pipeline.js'
 import type { PublishOutcome } from '../platforms/types.js'
 import { changeChannelStatus, deliverDueWebhooks, emitJobOutcome, webhooksIntervalMs } from '../webhooks.js'
 
@@ -182,6 +183,7 @@ export class Worker {
   private lastMessages = 0
   private lastRetention = 0
   private lastWebhooks = 0
+  private lastAnswering = 0
   // Collectors run beside publishing, never in its way: one pass of each at a time, outside the job slots.
   private metrics: Promise<void> | undefined
   private responses: Promise<void> | undefined
@@ -193,6 +195,8 @@ export class Worker {
   private retention: Promise<void> | undefined
   // Webhook deliveries: a few requests at once, outside the job slots.
   private webhooks: Promise<void> | undefined
+  // AI answers: decides and drafts what the readers stored, after they committed. Holds no reading or sending code.
+  private answering: Promise<void> | undefined
   // Post, account and comment reads share about 60 platform calls a minute; each request spends one.
   private readonly budget = new CallBudget()
 
@@ -206,7 +210,7 @@ export class Worker {
   async stop() {
     this.stopping = true
     clearInterval(this.timer)
-    await Promise.allSettled([...this.running, this.metrics, this.responses, this.replies, this.conversations, this.messages, this.retention, this.webhooks])
+    await Promise.allSettled([...this.running, this.metrics, this.responses, this.replies, this.conversations, this.messages, this.retention, this.webhooks, this.answering])
   }
 
   async tick() {
@@ -268,6 +272,13 @@ export class Worker {
           .then(result => { if (result.failed) log('info', 'webhooks delivered', result) })
           .catch(error => log('error', 'webhooks pass failed', errorFields(error)))
           .finally(() => { this.webhooks = undefined })
+      }
+      if (!this.answering && Date.now() - this.lastAnswering >= answeringIntervalMs) {
+        this.lastAnswering = Date.now()
+        this.answering = runAnswering(this.context)
+          .then(result => { if (result.drafted || result.failed) log('info', 'inbound items decided', result) })
+          .catch(error => log('error', 'answering pass failed', errorFields(error)))
+          .finally(() => { this.answering = undefined })
       }
       if (!this.retention && Date.now() - this.lastRetention >= retentionIntervalMs) {
         this.lastRetention = Date.now()
