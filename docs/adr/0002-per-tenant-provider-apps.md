@@ -19,7 +19,8 @@ Store provider apps as records, each with:
 
 - the platform and the platform's app identifier,
 - an owner: one tenant, or `agency` for a shared app,
-- a secret reference (a Nomad variable key), never the secret itself,
+- a secret reference (a key in the operator's secret store), never the
+  secret itself,
 - its mode (development or live) and the permissions granted to it.
 
 Every channel references the provider app it was authorized through. Token
