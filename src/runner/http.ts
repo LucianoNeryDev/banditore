@@ -4,7 +4,7 @@ import { z, ZodError } from 'zod'
 import { errorFields, log } from '../log.js'
 import { actionRequestSchema, actionView, type ActionStore } from './actions.js'
 
-/** The runner's API. Only the engine calls it, over the tailnet, with its own bearer token. */
+/** The runner's API. Only the engine calls it, over a private network, with its own bearer token. */
 export function createRunnerApp(store: ActionStore, token: string, wake: () => void) {
   const expected = digest(token)
   const router = createRouter()

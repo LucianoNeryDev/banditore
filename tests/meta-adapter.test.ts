@@ -29,7 +29,7 @@ const timeout = () => { throw Object.assign(new Error('timed out'), { name: 'Tim
 const refused = () => { throw new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } }) }
 
 const input = (overrides: Partial<PublishInput> = {}): PublishInput => ({
-  attemptId: 'attempt-1', channel: { id: 'c1', kind: 'facebook_page', externalId: '1288534674353714' }, token: 'page-token-abc',
+  attemptId: 'attempt-1', channel: { id: 'c1', kind: 'facebook_page', externalId: '1000000000000101' }, token: 'page-token-abc',
   content: 'Ciao Brescia', media: [], settings: {}, ...overrides,
 })
 
@@ -50,14 +50,14 @@ describe('Meta connect', () => {
     const { adapter, calls } = fakeGraph([
       json({ access_token: 'short-user' }),
       json({ access_token: 'long-user', expires_in: 5_184_000 }),
-      json({ data: [{ id: '1', name: 'Leonessa', access_token: 'page-1', tasks: ['CREATE_CONTENT', 'MANAGE'] }, { id: '2', name: 'Read only', access_token: 'page-2', tasks: ['ANALYZE'] }],
+      json({ data: [{ id: '1', name: 'Bottega', access_token: 'page-1', tasks: ['CREATE_CONTENT', 'MANAGE'] }, { id: '2', name: 'Read only', access_token: 'page-2', tasks: ['ANALYZE'] }],
         paging: { cursors: { after: 'cursor-1' }, next: 'https://graph.facebook.com/next' } }),
       json({ data: [{ id: '3', name: 'Client', access_token: 'page-3', tasks: ['CREATE_CONTENT'] }] }),
       json({ data: { granular_scopes: [{ scope: 'pages_manage_posts', target_ids: ['1', '3'] }] } }),
     ])
     const accounts = await adapter.finishConnect(app, 'oauth-code')
     expect(accounts).toEqual([
-      { kind: 'facebook_page', externalId: '1', name: 'Leonessa', token: 'page-1', tokenExpiresAt: null },
+      { kind: 'facebook_page', externalId: '1', name: 'Bottega', token: 'page-1', tokenExpiresAt: null },
       { kind: 'facebook_page', externalId: '3', name: 'Client', token: 'page-3', tokenExpiresAt: null },
     ])
     expect(calls[0]!.url.searchParams.get('redirect_uri')).toBe(redirectUri)
@@ -71,10 +71,10 @@ describe('Meta connect', () => {
 
 describe('Meta publish', () => {
   it('posts text to the Page feed with an app secret proof', async () => {
-    const { adapter, calls } = fakeGraph([json({ id: '1288534674353714_99' })])
-    expect(await adapter.publish(app, input())).toEqual({ kind: 'published', externalId: '1288534674353714_99', url: 'https://www.facebook.com/1288534674353714_99' })
+    const { adapter, calls } = fakeGraph([json({ id: '1000000000000101_99' })])
+    expect(await adapter.publish(app, input())).toEqual({ kind: 'published', externalId: '1000000000000101_99', url: 'https://www.facebook.com/1000000000000101_99' })
     const body = calls[0]!.body as URLSearchParams
-    expect(calls[0]!.url.pathname).toBe('/v26.0/1288534674353714/feed')
+    expect(calls[0]!.url.pathname).toBe('/v26.0/1000000000000101/feed')
     expect(body.get('message')).toBe('Ciao Brescia')
     expect(body.get('appsecret_proof')).toBe(appSecretProof('page-token-abc', app.secret))
     expect(body.has('published')).toBe(false)
@@ -85,7 +85,7 @@ describe('Meta publish', () => {
     const { adapter, calls } = fakeGraph([json({ id: '501' }), json({ id: '502' }), json({ id: '1_77' })])
     const media = [1, 2].map(index => mediaFile(`m${index}`, `${index}.jpg`, 'image/jpeg', Buffer.from([0xff, 0xd8, 0xff, index])))
     expect(await adapter.publish(app, input({ media }))).toMatchObject({ kind: 'published', externalId: '1_77' })
-    expect(calls.map(call => call.url.pathname)).toEqual(['/v26.0/1288534674353714/photos', '/v26.0/1288534674353714/photos', '/v26.0/1288534674353714/feed'])
+    expect(calls.map(call => call.url.pathname)).toEqual(['/v26.0/1000000000000101/photos', '/v26.0/1000000000000101/photos', '/v26.0/1000000000000101/feed'])
     expect((calls[0]!.body as FormData).get('published')).toBe('false')
     expect((calls[0]!.body as FormData).get('source')).toBeInstanceOf(Blob)
     const feed = calls[2]!.body as URLSearchParams
@@ -95,8 +95,8 @@ describe('Meta publish', () => {
 
   it('shares a link with its preview card', async () => {
     const { adapter, calls } = fakeGraph([json({ id: '1_6' })])
-    await adapter.publish(app, input({ settings: { link: 'https://leonessadigital.com/blog/sito' } }))
-    expect((calls[0]!.body as URLSearchParams).get('link')).toBe('https://leonessadigital.com/blog/sito')
+    await adapter.publish(app, input({ settings: { link: 'https://bottega.example/blog/sito' } }))
+    expect((calls[0]!.body as URLSearchParams).get('link')).toBe('https://bottega.example/blog/sito')
   })
 
   it('creates a hidden post when the channel settings ask for it', async () => {
@@ -141,7 +141,7 @@ describe('Meta publish', () => {
   it('rejects settings it does not know', () => {
     const { adapter } = fakeGraph([])
     const image = [jpegInfo(1080, 1080)]
-    expect(() => adapter.validateSettings('facebook_page', { unpublished: true, link: 'https://leonessadigital.com/blog/a' }, [])).not.toThrow()
+    expect(() => adapter.validateSettings('facebook_page', { unpublished: true, link: 'https://bottega.example/blog/a' }, [])).not.toThrow()
     expect(() => adapter.validateSettings('facebook_page', { link: 'x' }, [])).toThrow('Invalid Facebook Page settings')
     expect(() => adapter.validateSettings('facebook_page', { link: 'http://example.com' }, [])).toThrow('Invalid Facebook Page settings')
     expect(() => adapter.validateSettings('facebook_page', { other: true }, [])).toThrow('Invalid Facebook Page settings')
@@ -153,7 +153,7 @@ const jpegInfo = (width: number | null, height: number | null, overrides: Partia
   ({ id: 'm1', mimeType: 'image/jpeg', sizeBytes: 200_000, width, height, ...overrides })
 
 describe('Instagram', () => {
-  const igChannel = { id: 'c2', kind: 'instagram_account' as const, externalId: '17841414614667219' }
+  const igChannel = { id: 'c2', kind: 'instagram_account' as const, externalId: '17841400000000002' }
   const image = (index: number) => ({ ...mediaFile(`m${index}`, `${index}.jpg`, 'image/jpeg', Buffer.from([0xff, 0xd8, 0xff, index])),
     publicUrl: `https://dash-api.example.com/api/social/media/org/m${index}?expires=1&signature=s` })
   const igInput = (overrides: Partial<PublishInput> = {}) => input({ channel: igChannel, media: [image(1)], ...overrides })
@@ -163,12 +163,12 @@ describe('Instagram', () => {
   it('connects the Instagram account linked to a Page with the Page token', async () => {
     const { adapter, calls } = fakeGraph([
       json({ access_token: 'short-user' }), json({ access_token: 'long-user' }),
-      json({ data: [{ id: '1', name: 'Leonessa', access_token: 'page-1', tasks: ['CREATE_CONTENT'], instagram_business_account: { id: '178', username: 'leonessa.digital' } }] }),
+      json({ data: [{ id: '1', name: 'Bottega', access_token: 'page-1', tasks: ['CREATE_CONTENT'], instagram_business_account: { id: '178', username: 'bottega.digitale' } }] }),
       json({ data: { granular_scopes: [{ scope: 'pages_manage_posts', target_ids: ['1'] }] } }),
     ])
     expect(await adapter.finishConnect(app, 'code')).toEqual([
-      { kind: 'facebook_page', externalId: '1', name: 'Leonessa', token: 'page-1', tokenExpiresAt: null },
-      { kind: 'instagram_account', externalId: '178', name: '@leonessa.digital', token: 'page-1', tokenExpiresAt: null },
+      { kind: 'facebook_page', externalId: '1', name: 'Bottega', token: 'page-1', tokenExpiresAt: null },
+      { kind: 'instagram_account', externalId: '178', name: '@bottega.digitale', token: 'page-1', tokenExpiresAt: null },
     ])
     expect(calls[2]!.url.searchParams.get('fields')).toContain('instagram_business_account{id,username}')
   })
@@ -177,11 +177,11 @@ describe('Instagram', () => {
     const { adapter, calls } = fakeGraph([
       json({ access_token: 'short-user' }), json({ access_token: 'long-user' }), json({ data: [] }),
       json({ data: { granular_scopes: [{ scope: 'pages_show_list', target_ids: ['9'] }, { scope: 'pages_manage_posts', target_ids: ['1288'] }] } }),
-      json({ id: '1288', name: 'Leonessa', access_token: 'page-1288', instagram_business_account: { id: '178', username: 'leonessa.digital' } }),
+      json({ id: '1288', name: 'Bottega', access_token: 'page-1288', instagram_business_account: { id: '178', username: 'bottega.digitale' } }),
     ])
     expect(await adapter.finishConnect(app, 'code')).toEqual([
-      { kind: 'facebook_page', externalId: '1288', name: 'Leonessa', token: 'page-1288', tokenExpiresAt: null },
-      { kind: 'instagram_account', externalId: '178', name: '@leonessa.digital', token: 'page-1288', tokenExpiresAt: null },
+      { kind: 'facebook_page', externalId: '1288', name: 'Bottega', token: 'page-1288', tokenExpiresAt: null },
+      { kind: 'instagram_account', externalId: '178', name: '@bottega.digitale', token: 'page-1288', tokenExpiresAt: null },
     ])
     expect(calls[3]!.url.pathname).toBe('/v26.0/debug_token')
     expect(calls[3]!.url.searchParams.get('input_token')).toBe('long-user')
@@ -209,7 +209,7 @@ describe('Instagram', () => {
     ])
     expect(await adapter.publish(app, igInput())).toEqual({ kind: 'published', externalId: '18000', url: 'https://www.instagram.com/p/abc/' })
     expect(calls.map(call => `${call.method} ${call.url.pathname}`)).toEqual([
-      'POST /v26.0/17841414614667219/media', 'GET /v26.0/900', 'GET /v26.0/900', 'POST /v26.0/17841414614667219/media_publish', 'GET /v26.0/18000',
+      'POST /v26.0/17841400000000002/media', 'GET /v26.0/900', 'GET /v26.0/900', 'POST /v26.0/17841400000000002/media_publish', 'GET /v26.0/18000',
     ])
     const container = calls[0]!.body as URLSearchParams
     expect(container.get('image_url')).toBe(image(1).publicUrl)
@@ -282,7 +282,7 @@ describe('Meta reconcile', () => {
 
 describe('Meta metrics', () => {
   const metricsInput = (kind: 'facebook_page' | 'instagram_account', externalId: string) => ({
-    channel: { id: 'c1', kind, externalId: '1288534674353714' }, token: 'page-token-abc', externalId,
+    channel: { id: 'c1', kind, externalId: '1000000000000101' }, token: 'page-token-abc', externalId,
   })
 
   it('reads a Page post\'s reactions, comments, shares, views and reach', async () => {
@@ -349,7 +349,7 @@ describe('Meta metrics', () => {
 })
 
 describe('Meta account metrics', () => {
-  const page = { id: 'c1', kind: 'facebook_page' as const, externalId: '1288534674353714' }
+  const page = { id: 'c1', kind: 'facebook_page' as const, externalId: '1000000000000101' }
   const account = { id: 'c2', kind: 'instagram_account' as const, externalId: '17841400000000000' }
   const now = new Date('2030-01-02T10:00:00Z')
 
@@ -357,7 +357,7 @@ describe('Meta account metrics', () => {
     const days = (a: number, b: number) => [{ value: a, end_time: '2030-01-01T08:00:00+0000' }, { value: b, end_time: '2030-01-02T08:00:00+0000' },
       { value: 999, end_time: '2030-01-03T08:00:00+0000' }]
     const { adapter, calls } = fakeGraph([
-      json({ id: '1288534674353714', followers_count: 1520, fan_count: 1400 }),
+      json({ id: '1000000000000101', followers_count: 1520, fan_count: 1400 }),
       json({ data: [{ name: 'page_media_view', period: 'day', values: days(10, 340) }, { name: 'page_total_media_view_unique', period: 'day', values: days(5, 210) },
         { name: 'page_views_total', period: 'day', values: days(1, 12) }] }),
     ])
@@ -414,20 +414,20 @@ describe('Meta account metrics', () => {
 })
 
 describe('Meta responses', () => {
-  const post = { channel: { id: 'c1', kind: 'facebook_page' as const, externalId: '1288534674353714' }, token: 'page-token-abc', externalId: '1_2' }
+  const post = { channel: { id: 'c1', kind: 'facebook_page' as const, externalId: '1000000000000101' }, token: 'page-token-abc', externalId: '1_2' }
   const media = { channel: { id: 'c2', kind: 'instagram_account' as const, externalId: '17841400000000000' }, token: 'page-token-abc', externalId: '1801' }
   const comment = (id: string, extra: Record<string, unknown> = {}) => ({ id, message: `text ${id}`, created_time: '2030-01-01T10:00:00+0000', like_count: 1,
     comment_count: 0, from: { name: 'Mario Rossi', id: '999' }, permalink_url: `https://www.facebook.com/${id}`, ...extra })
 
   it('reads Page comments and replies newest first, keeping only the commenter\'s name and whether the Page wrote it', async () => {
     const { adapter, calls } = fakeGraph([
-      json({ data: [comment('1_2_4', { parent: { id: '1_2_1' }, from: { name: 'Leonessa', id: post.channel.externalId } }),
+      json({ data: [comment('1_2_4', { parent: { id: '1_2_1' }, from: { name: 'Bottega', id: post.channel.externalId } }),
         comment('1_2_3', { parent: { id: '1_2_1' } }), comment('1_2_1', { comment_count: 1 })], paging: { cursors: { after: 'next-1' }, next: 'https://graph.facebook.com/next' } }),
       json({ data: [comment('1_2_0', { from: undefined, message: undefined })], paging: { cursors: { after: 'next-2' } } }),
     ])
     const result = await adapter.responses(app, post)
     expect(result).toEqual({ kind: 'ok', responses: [
-      expect.objectContaining({ externalId: '1_2_4', authorName: 'Leonessa', fromChannel: true }),
+      expect.objectContaining({ externalId: '1_2_4', authorName: 'Bottega', fromChannel: true }),
       { externalId: '1_2_3', parentExternalId: '1_2_1', authorName: 'Mario Rossi', authorHandle: null, text: 'text 1_2_3', likeCount: 1, replyCount: 0,
         publishedAt: new Date('2030-01-01T10:00:00Z'), url: 'https://www.facebook.com/1_2_3', fromChannel: false },
       expect.objectContaining({ externalId: '1_2_1', parentExternalId: null, replyCount: 1, fromChannel: false }),
@@ -455,19 +455,19 @@ describe('Meta responses', () => {
   it('reads Instagram comments with their replies, by username only, and tells the account\'s own', async () => {
     const { adapter, calls } = fakeGraph([json({ data: [
       { id: '17900', text: 'Bello!', username: 'mario.rossi', timestamp: '2030-01-01T09:00:00+0000', like_count: 2,
-        replies: { data: [{ id: '17901', text: 'Grazie', username: 'leonessa', timestamp: '2030-01-01T11:00:00+0000', like_count: 0, user: { id: media.channel.externalId } }] } },
+        replies: { data: [{ id: '17901', text: 'Grazie', username: 'bottega', timestamp: '2030-01-01T11:00:00+0000', like_count: 0, user: { id: media.channel.externalId } }] } },
       { id: '17800', text: 'Primo', username: 'anna', timestamp: '2030-01-01T08:00:00+0000' },
     ] })])
     expect(await adapter.responses(app, media)).toEqual({ kind: 'ok', responses: [
-      { externalId: '17901', parentExternalId: '17900', authorName: null, authorHandle: 'leonessa', text: 'Grazie', likeCount: 0, replyCount: null,
+      { externalId: '17901', parentExternalId: '17900', authorName: null, authorHandle: 'bottega', text: 'Grazie', likeCount: 0, replyCount: null,
         publishedAt: new Date('2030-01-01T11:00:00Z'), url: null, fromChannel: true },
       expect.objectContaining({ externalId: '17900', parentExternalId: null, authorHandle: 'mario.rossi', replyCount: 1, fromChannel: false }),
       expect.objectContaining({ externalId: '17800', likeCount: null, replyCount: 0, fromChannel: false }),
     ] })
     expect(calls[0]!.url.searchParams.get('fields')).toBe('id,text,username,timestamp,like_count,user,replies{id,text,username,timestamp,like_count,user}')
     // Without `user`, the account's own username tells it.
-    const named = fakeGraph([json({ data: [{ id: '17902', text: 'Grazie!', username: 'Leonessa', timestamp: '2030-01-01T12:00:00+0000' }] })])
-    expect(await named.adapter.responses(app, { ...media, channel: { ...media.channel, handle: 'leonessa' } }))
+    const named = fakeGraph([json({ data: [{ id: '17902', text: 'Grazie!', username: 'Bottega', timestamp: '2030-01-01T12:00:00+0000' }] })])
+    expect(await named.adapter.responses(app, { ...media, channel: { ...media.channel, handle: 'bottega' } }))
       .toMatchObject({ responses: [{ externalId: '17902', fromChannel: true }] })
   })
 
@@ -491,26 +491,26 @@ describe('Meta responses', () => {
 })
 
 describe('Meta account activity', () => {
-  const page = { id: 'c1', kind: 'facebook_page' as const, externalId: '1288534674353714' }
+  const page = { id: 'c1', kind: 'facebook_page' as const, externalId: '1000000000000101' }
   const account = { id: 'c2', kind: 'instagram_account' as const, externalId: '17841400000000000' }
 
   it('reads a Page profile and its newest published posts, in two requests the budget pays for', async () => {
     const { adapter, calls } = fakeGraph([
-      json({ name: 'Leonessa Digital', username: 'leonessadigital', about: 'Agenzia web', website: 'https://leonessadigital.com', category: 'Web designer',
+      json({ name: 'Bottega Digitale', username: 'bottegadigitale', about: 'Agenzia web', website: 'https://bottega.example', category: 'Web designer',
         picture: { data: { url: 'https://scontent.xx.fbcdn.net/v/t39/pic.jpg?oh=1&oe=2' } } }),
-      json({ data: [{ id: '1288534674353714_2', message: 'Nuovo video', created_time: '2030-01-02T09:00:00+0000', permalink_url: 'https://facebook.com/p/2',
-        status_type: 'added_video' }, { id: '1288534674353714_1', created_time: '2030-01-01T09:00:00+0000', status_type: 'published_story' }] }),
+      json({ data: [{ id: '1000000000000101_2', message: 'Nuovo video', created_time: '2030-01-02T09:00:00+0000', permalink_url: 'https://facebook.com/p/2',
+        status_type: 'added_video' }, { id: '1000000000000101_1', created_time: '2030-01-01T09:00:00+0000', status_type: 'published_story' }] }),
     ])
     let spent = 0
     expect(await adapter.accountActivity(app, { channel: page, token: 'page-token-abc', spendCall: () => { spent++ } })).toEqual({
-      profile: { name: 'Leonessa Digital', username: 'leonessadigital', description: 'Agenzia web', website: 'https://leonessadigital.com',
+      profile: { name: 'Bottega Digitale', username: 'bottegadigitale', description: 'Agenzia web', website: 'https://bottega.example',
         category: 'Web designer', pictureUrl: 'https://scontent.xx.fbcdn.net/v/t39/pic.jpg?oh=1&oe=2' },
       posts: [
-        { externalId: '1288534674353714_2', type: 'video', text: 'Nuovo video', url: 'https://facebook.com/p/2', publishedAt: new Date('2030-01-02T09:00:00Z') },
-        { externalId: '1288534674353714_1', type: 'other', text: null, url: null, publishedAt: new Date('2030-01-01T09:00:00Z') },
+        { externalId: '1000000000000101_2', type: 'video', text: 'Nuovo video', url: 'https://facebook.com/p/2', publishedAt: new Date('2030-01-02T09:00:00Z') },
+        { externalId: '1000000000000101_1', type: 'other', text: null, url: null, publishedAt: new Date('2030-01-01T09:00:00Z') },
       ],
     })
-    expect(calls.map(call => call.url.pathname)).toEqual(['/v26.0/1288534674353714', '/v26.0/1288534674353714/published_posts'])
+    expect(calls.map(call => call.url.pathname)).toEqual(['/v26.0/1000000000000101', '/v26.0/1000000000000101/published_posts'])
     expect(calls[0]!.url.searchParams.get('fields')).toBe('name,username,about,website,category,picture{url}')
     expect(calls[1]!.url.searchParams.get('limit')).toBe('25')
     expect(spent).toBe(1)
@@ -518,12 +518,12 @@ describe('Meta account activity', () => {
 
   it('reads a Page-linked Instagram profile and media, telling reels and carousels apart', async () => {
     const { adapter, calls } = fakeGraph([
-      json({ username: 'leonessa.digital', name: 'Leonessa', biography: 'Siti e app', website: 'https://leonessadigital.com', profile_picture_url: 'https://cdn/x.jpg?a=1' }),
+      json({ username: 'bottega.digitale', name: 'Bottega', biography: 'Siti e app', website: 'https://bottega.example', profile_picture_url: 'https://cdn/x.jpg?a=1' }),
       json({ data: [{ id: 'm3', media_type: 'VIDEO', media_product_type: 'REELS', caption: 'x'.repeat(900), permalink: 'https://instagram.com/reel/m3', timestamp: '2030-01-02T09:00:00+0000' },
         { id: 'm2', media_type: 'CAROUSEL_ALBUM', media_product_type: 'FEED' }, { id: 'm1', media_type: 'IMAGE' }] }),
     ])
     const result = await adapter.accountActivity(app, { channel: account, token: 'page-token-abc' })
-    expect(result.profile).toEqual({ name: 'Leonessa', username: 'leonessa.digital', description: 'Siti e app', website: 'https://leonessadigital.com',
+    expect(result.profile).toEqual({ name: 'Bottega', username: 'bottega.digitale', description: 'Siti e app', website: 'https://bottega.example',
       category: null, pictureUrl: 'https://cdn/x.jpg?a=1' })
     expect(result.posts.map(post => [post.externalId, post.type])).toEqual([['m3', 'reel'], ['m2', 'carousel'], ['m1', 'image']])
     expect(result.posts[0]!.text).toHaveLength(500)

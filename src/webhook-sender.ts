@@ -22,7 +22,7 @@ export type WebhookSender = (request: WebhookRequest) => Promise<WebhookResult>
 
 /**
  * Addresses a webhook may never reach: loopback, private and link-local
- * networks, the tailnet's CGNAT range, documentation and benchmark ranges,
+ * networks, the shared CGNAT range, documentation and benchmark ranges,
  * multicast, and IPv6 forms that embed an IPv4 address (mapped, NAT64, 6to4),
  * so none of them can lead back inside. Two lists, because a BlockList also
  * matches IPv4 addresses against IPv6 rules, and ::ffff:0:0/96 holds them all.

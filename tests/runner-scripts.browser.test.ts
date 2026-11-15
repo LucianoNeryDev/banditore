@@ -36,7 +36,7 @@ const fakes: Record<string, Record<string, string>> = {
       for (const b of document.querySelectorAll('[role=dialog] button')) b.onclick = () => document.querySelector('[data-floating-ui-portal]').remove()
       document.querySelector('[data-e2e=post_video_button]').onclick = () => { sessionStorage.result = JSON.stringify(window.posted()); location.href = '/tiktokstudio/content' }`),
     'https://www.tiktok.com/tiktokstudio/content': page('<p>Contenuti</p>'),
-    'https://www.tiktok.com/@leonessa': page('<a href="/@leonessa/video/7560000000000000001">v</a>', 'window.result = JSON.parse(sessionStorage.result)'),
+    'https://www.tiktok.com/@bottega': page('<a href="/@bottega/video/7560000000000000001">v</a>', 'window.result = JSON.parse(sessionStorage.result)'),
   },
   // TikTok Studio as on 2026-11-06, when a two-step feature tour covered the caption.
   tiktokTour: {
@@ -51,13 +51,13 @@ const fakes: Record<string, Record<string, string>> = {
         else { document.querySelector('#react-joyride-portal').remove(); document.querySelector('.__floater').remove() } }
       document.querySelector('[data-e2e=post_video_button]').onclick = () => { sessionStorage.result = JSON.stringify(window.posted()); location.href = '/tiktokstudio/content' }`),
     'https://www.tiktok.com/tiktokstudio/content': page('<p>Contenuti</p>'),
-    'https://www.tiktok.com/@leonessa': page('<a href="/@leonessa/video/7560000000000000002">v</a>', 'window.result = JSON.parse(sessionStorage.result)'),
+    'https://www.tiktok.com/@bottega': page('<a href="/@bottega/video/7560000000000000002">v</a>', 'window.result = JSON.parse(sessionStorage.result)'),
   },
   x: {
     'https://x.com/compose/post': page(`<div role="dialog"><div data-testid="tweetTextarea_0" contenteditable="true"></div>
       <input type="file" data-testid="fileInput" multiple style="display:none"><button data-testid="tweetButton">Posta</button></div>`,
     `${record}; document.querySelector('[data-testid=tweetButton]').onclick = () => { window.result = window.posted(); document.querySelector('[role=dialog]').remove()
-      document.body.insertAdjacentHTML('beforeend', '<div data-testid="toast">Post inviato <a href="/leonessa/status/1850000000000000001">Visualizza</a></div>') }`),
+      document.body.insertAdjacentHTML('beforeend', '<div data-testid="toast">Post inviato <a href="/bottega/status/1850000000000000001">Visualizza</a></div>') }`),
   },
   linkedin: {
     'https://www.linkedin.com/feed/?shareActive=true': page(`<a href="/feed/update/urn:li:activity:111/">someone else</a>
@@ -72,7 +72,7 @@ const fakes: Record<string, Record<string, string>> = {
   threads: {
     'https://www.threads.com/intent/post': page(`<div role="dialog"><div contenteditable="true"></div><input type="file" multiple style="display:none"><div role="button" tabindex="0">Pubblica</div></div>`,
       `${record}; document.querySelector('[role=button]').onclick = () => { window.result = window.posted(); document.querySelector('[role=dialog]').remove()
-        document.body.insertAdjacentHTML('beforeend', '<div role="alert">Pubblicato <a href="/@leonessa/post/DQabc123">Visualizza</a></div>') }`),
+        document.body.insertAdjacentHTML('beforeend', '<div role="alert">Pubblicato <a href="/@bottega/post/DQabc123">Visualizza</a></div>') }`),
   },
   pinterest: {
     'https://www.pinterest.com/pin-creation-tool/': page(`<input type="file"><input id="storyboard-selector-title">
@@ -122,7 +122,7 @@ describe.skipIf(!executablePath)('runner scripts against fake pages', () => {
     let visible = false
     const action = { id: 'a', actionId: 'attempt-1', kind: 'publish_post', state: 'running', createdAt: '', updatedAt: '', content: 'Ciao Brescia\nSiti web veloci',
       media: files.map(() => ({ url: 'https://dash-api.example.com/m', mimeType: 'image/png' as const })), settings: {},
-      account: { id: accountId, platform, handle: 'leonessa', sealed: { ephemeralPublicKey: '', nonce: '', ciphertext: '' } }, ...overrides } as Action
+      account: { id: accountId, platform, handle: 'bottega', sealed: { ephemeralPublicKey: '', nonce: '', ciphertext: '' } }, ...overrides } as Action
     const script: ScriptContext = { action, secret: { username: 'u', password: 'p' }, files, visible: () => { visible = true },
       needHuman: async (reason) => { throw new Error(`needs a person: ${reason}`) } }
     try {
@@ -139,7 +139,7 @@ describe.skipIf(!executablePath)('runner scripts against fake pages', () => {
     const { receipt, visible, result } = await run('tiktok', tiktokScripts, { media: [{ url: 'https://dash-api.example.com/m', mimeType: 'video/mp4' }] }, [mp4])
     expect(visible).toBe(true)
     expect(result).toMatchObject({ text: 'Ciao Brescia\nSiti web veloci' })
-    expect(receipt).toEqual({ externalId: '7560000000000000001', url: 'https://www.tiktok.com/@leonessa/video/7560000000000000001' })
+    expect(receipt).toEqual({ externalId: '7560000000000000001', url: 'https://www.tiktok.com/@bottega/video/7560000000000000001' })
   })
 
   it('walks through the TikTok Studio feature tour before typing the caption', async () => {
@@ -147,18 +147,18 @@ describe.skipIf(!executablePath)('runner scripts against fake pages', () => {
     writeFileSync(mp4, Buffer.alloc(16))
     const { receipt, result } = await run('tiktokTour', tiktokScripts, { media: [{ url: 'https://dash-api.example.com/m', mimeType: 'video/mp4' }] }, [mp4])
     expect(result).toMatchObject({ text: 'Ciao Brescia\nSiti web veloci' })
-    expect(receipt).toEqual({ externalId: '7560000000000000002', url: 'https://www.tiktok.com/@leonessa/video/7560000000000000002' })
+    expect(receipt).toEqual({ externalId: '7560000000000000002', url: 'https://www.tiktok.com/@bottega/video/7560000000000000002' })
   })
 
   it('posts on X with an image and reads the toast receipt', async () => {
     const { receipt, visible, result } = await run('x', xScripts, {}, [png])
     expect(visible).toBe(true)
     expect(result).toMatchObject({ text: 'Ciao Brescia\nSiti web veloci', files: 1 })
-    expect(receipt).toEqual({ externalId: '1850000000000000001', url: 'https://x.com/leonessa/status/1850000000000000001' })
+    expect(receipt).toEqual({ externalId: '1850000000000000001', url: 'https://x.com/bottega/status/1850000000000000001' })
   })
 
   it('posts on a LinkedIn profile through the media editor, reading only the toast', async () => {
-    const { receipt, result } = await run('linkedin', linkedinScripts, { target: { kind: 'linkedin_profile', externalId: 'leonessa' } }, [png])
+    const { receipt, result } = await run('linkedin', linkedinScripts, { target: { kind: 'linkedin_profile', externalId: 'bottega' } }, [png])
     expect(result).toMatchObject({ text: 'Ciao Brescia\nSiti web veloci', files: 1 })
     expect(receipt).toEqual({ externalId: 'urn:li:activity:7390000000000000000', url: 'https://www.linkedin.com/feed/update/urn:li:activity:7390000000000000000/' })
   })
@@ -166,12 +166,12 @@ describe.skipIf(!executablePath)('runner scripts against fake pages', () => {
   it('posts on Threads through the share intent', async () => {
     const { receipt, result } = await run('threads', threadsScripts)
     expect(result).toMatchObject({ text: 'Ciao Brescia\nSiti web veloci', files: 0 })
-    expect(receipt).toEqual({ externalId: 'DQabc123', url: 'https://www.threads.com/@leonessa/post/DQabc123' })
+    expect(receipt).toEqual({ externalId: 'DQabc123', url: 'https://www.threads.com/@bottega/post/DQabc123' })
   })
 
   it('creates a Pin on the exact board with title and link', async () => {
-    const { receipt, result } = await run('pinterest', pinterestScripts, { settings: { board: 'Siti web', title: 'Siti veloci', link: 'https://leonessadigital.com/blog' } }, [png])
-    expect(result).toMatchObject({ files: 1, title: 'Siti veloci', link: 'https://leonessadigital.com/blog', board: 'Siti web' })
+    const { receipt, result } = await run('pinterest', pinterestScripts, { settings: { board: 'Siti web', title: 'Siti veloci', link: 'https://bottega.example/blog' } }, [png])
+    expect(result).toMatchObject({ files: 1, title: 'Siti veloci', link: 'https://bottega.example/blog', board: 'Siti web' })
     expect(receipt).toEqual({ externalId: '987654321', url: 'https://www.pinterest.com/pin/987654321/' })
   })
 

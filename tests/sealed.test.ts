@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { isRunnerPublicKey, openSecret, runnerKeyPair, sealSecret } from '../src/crypto/sealed.js'
 
-const secret = JSON.stringify({ username: 'leonessa.digital', password: 'correct horse battery staple', totp: 'JBSWY3DPEHPK3PXP' })
+const secret = JSON.stringify({ username: 'bottega.digitale', password: 'correct horse battery staple', totp: 'JBSWY3DPEHPK3PXP' })
 
 describe('sealed secrets', () => {
   const runner = runnerKeyPair()

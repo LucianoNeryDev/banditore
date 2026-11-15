@@ -5,7 +5,7 @@ import { MetaAdapter } from '../src/platforms/meta/adapter.js'
 import { ReauthRequired, type MediaFile, type MediaInfo, type PublishInput, type ResolvedProviderApp } from '../src/platforms/types.js'
 import { mediaFile } from './fixtures/media.js'
 
-const app: ResolvedProviderApp = { id: 'instagram-test', platform: 'instagram', externalAppId: '1582792782997136', secret: 'ig-secret-123', settings: {} }
+const app: ResolvedProviderApp = { id: 'instagram-test', platform: 'instagram', externalAppId: '1000000000000202', secret: 'ig-secret-123', settings: {} }
 const redirectUri = 'https://dash-api.example.com/api/social/connect/instagram/callback'
 
 interface Call { method: string, url: URL, headers: Record<string, string>, body: FormData | URLSearchParams | undefined }
@@ -35,8 +35,8 @@ const graphError = (status: number, code: number) => json({ error: { message: 'b
 const video: MediaFile = { ...mediaFile('v1', 'ep19.mp4', 'video/mp4'), publicUrl: 'https://dash-api.example.com/api/social/media/org/v1?sig=1' }
 const cover: MediaFile = { ...mediaFile('c1', 'thumb.jpg', 'image/jpeg'), publicUrl: 'https://dash-api.example.com/api/social/media/org/c1?sig=2' }
 const input = (overrides: Partial<PublishInput> = {}): PublishInput => ({
-  attemptId: 'attempt-1', channel: { id: 'c1', kind: 'instagram_account', externalId: '17841425322726848' }, token: 'IGAA-token',
-  content: 'Halo vs Cinder | OrbVora Duels Ep. 19', media: [video], settings: {}, ...overrides,
+  attemptId: 'attempt-1', channel: { id: 'c1', kind: 'instagram_account', externalId: '17841400000000010' }, token: 'IGAA-token',
+  content: 'Weekly Duel | Arcade Duels Ep. 19', media: [video], settings: {}, ...overrides,
 })
 const info = (mimeType: string, extra: Partial<MediaInfo> = {}): MediaInfo => ({ id: mimeType, mimeType, sizeBytes: 1_000, width: null, height: null, ...extra })
 
@@ -51,12 +51,12 @@ describe('Instagram login connect', () => {
 
   it('exchanges the code for a long-lived token and reads the account', async () => {
     const { adapter, calls } = instagram([
-      json({ access_token: 'short', user_id: 17841425322726848 }),
+      json({ access_token: 'short', user_id: 17841400000000010 }),
       json({ access_token: 'IGAA-long', token_type: 'bearer', expires_in: 5_183_944 }),
-      json({ user_id: '17841425322726848', username: 'orbvora' }),
+      json({ user_id: '17841400000000010', username: 'arcadegames' }),
     ])
     const [account] = await adapter.finishConnect(app, 'oauth-code')
-    expect(account).toMatchObject({ kind: 'instagram_account', externalId: '17841425322726848', name: '@orbvora', token: 'IGAA-long' })
+    expect(account).toMatchObject({ kind: 'instagram_account', externalId: '17841400000000010', name: '@arcadegames', token: 'IGAA-long' })
     expect(account!.tokenExpiresAt!.getTime()).toBeGreaterThan(Date.now() + 59 * 86_400_000)
     expect(calls[0]!.url.href).toBe('https://api.instagram.com/oauth/access_token')
     expect(calls[1]!.url.href.startsWith('https://graph.instagram.com/access_token?')).toBe(true)
@@ -175,9 +175,9 @@ describe('Instagram login analytics', () => {
 
 describe('Instagram login account activity', () => {
   it('asks only for the profile fields Instagram login gives', async () => {
-    const { adapter, calls } = instagram([json({ username: 'leonessa.digital', name: 'Leonessa', profile_picture_url: 'https://cdn/x.jpg' }), json({ data: [] })])
-    expect(await adapter.accountActivity(null, { channel: { id: 'c1', kind: 'instagram_account', externalId: '17841400000000001' }, token: 'IGtoken' })).toEqual({
-      profile: { name: 'Leonessa', username: 'leonessa.digital', description: null, website: null, category: null, pictureUrl: 'https://cdn/x.jpg' }, posts: [] })
+    const { adapter, calls } = instagram([json({ username: 'bottega.digitale', name: 'Bottega', profile_picture_url: 'https://cdn/x.jpg' }), json({ data: [] })])
+    expect(await adapter.accountActivity(null, { channel: { id: 'c1', kind: 'instagram_account', externalId: '17841400000000010' }, token: 'IGtoken' })).toEqual({
+      profile: { name: 'Bottega', username: 'bottega.digitale', description: null, website: null, category: null, pictureUrl: 'https://cdn/x.jpg' }, posts: [] })
     expect(calls[0]!.url.host).toBe('graph.instagram.com')
     expect(calls[0]!.url.searchParams.get('fields')).toBe('username,name,profile_picture_url')
   })

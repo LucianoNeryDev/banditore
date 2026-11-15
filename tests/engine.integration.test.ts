@@ -75,7 +75,7 @@ class FakeAdapter implements PlatformAdapter {
     return this.responsesWith(input)
   }
   activityCalls: AccountActivityInput[] = []
-  activityWith: (input: AccountActivityInput) => Promise<AccountActivityResult> = async () => ({ profile: { name: 'Leonessa', username: 'leonessa', description: null,
+  activityWith: (input: AccountActivityInput) => Promise<AccountActivityResult> = async () => ({ profile: { name: 'Bottega', username: 'bottega', description: null,
     website: null, category: null, pictureUrl: null }, posts: [] })
   async accountActivity(_app: unknown, input: AccountActivityInput) {
     this.activityCalls.push(input)
@@ -118,7 +118,7 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
       providerSecrets: new Map([['meta-agency', 'agency-secret'], ['meta-tenant', 'tenant-secret']]), now: () => now }
   })
 
-  async function connect(names = ['Leonessa']) {
+  async function connect(names = ['Bottega']) {
     adapter.accounts = names.map(name => ({ kind: 'facebook_page', externalId: `${name}-${randomUUID()}`, name, token: `token-${name}-secret`, tokenExpiresAt: null }))
     const { state } = await startConnect(context, org, 'meta-agency')
     return (await finishConnect(context, org, state, 'code')).channels
@@ -149,7 +149,7 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
       expect(connected).toHaveLength(1)
       expect(JSON.stringify(connected)).not.toContain('secret')
       const [credential] = await db.select().from(channelCredentials).where(eq(channelCredentials.channelId, connected[0]!.id))
-      expect(credential!.ciphertext.includes(Buffer.from('token-Leonessa-secret'))).toBe(false)
+      expect(credential!.ciphertext.includes(Buffer.from('token-Bottega-secret'))).toBe(false)
     })
 
     it('uses each state once, only for its tenant and before expiry', async () => {
@@ -170,10 +170,10 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
     it('reactivates and updates a channel on reconnect', async () => {
       const [channel] = await connect()
       await db.update(channels).set({ status: 'needs_reauth' }).where(eq(channels.id, channel!.id))
-      adapter.accounts = [{ ...adapter.accounts[0]!, name: 'Leonessa Digital', token: 'fresh-token' }]
+      adapter.accounts = [{ ...adapter.accounts[0]!, name: 'Bottega Digitale', token: 'fresh-token' }]
       const { state } = await startConnect(context, org, 'meta-agency')
       const [again] = (await finishConnect(context, org, state, 'code')).channels
-      expect(again).toMatchObject({ id: channel!.id, name: 'Leonessa Digital', status: 'active' })
+      expect(again).toMatchObject({ id: channel!.id, name: 'Bottega Digitale', status: 'active' })
     })
   })
 
@@ -280,7 +280,7 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
       expect(await claimNext(context)).toBeNull()
       advance(60 * 60_000)
       expect(await runDue()).toMatchObject({ kind: 'published' })
-      expect(adapter.published[0]).toMatchObject({ token: 'token-Leonessa-secret', content: 'Ciao Brescia' })
+      expect(adapter.published[0]).toMatchObject({ token: 'token-Bottega-secret', content: 'Ciao Brescia' })
       expect((await mediaFileBytes(adapter.published[0]!.media[0]!)).equals(png)).toBe(true)
       const [job] = (await listJobs(context, org, input.postId)).jobs
       expect(job).toMatchObject({ state: 'published', attemptCount: 1, receipt: { externalId: 'post-1', settledBy: 'worker' } })
@@ -530,20 +530,20 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
   describe('vault', () => {
     it('seals logins to the runner, replaces them in place and lists no secrets', async () => {
       const runner = runnerKeyPair()
-      const input = { organizationId: org, platform: 'tiktok' as const, handle: 'leonessa.digital' }
-      const first = await putBrowserAccount(db, runner.publicKey, input, { username: 'leonessa.digital', password: 'first-password' })
+      const input = { organizationId: org, platform: 'tiktok' as const, handle: 'bottega.digitale' }
+      const first = await putBrowserAccount(db, runner.publicKey, input, { username: 'bottega.digitale', password: 'first-password' })
       expect(first.created).toBe(true)
       await db.update(browserAccounts).set({ status: 'active' }).where(eq(browserAccounts.id, first.id))
-      const second = await putBrowserAccount(db, runner.publicKey, input, { username: 'leonessa.digital', password: 'second-password', totp: 'JBSWY3DPEHPK3PXP' })
+      const second = await putBrowserAccount(db, runner.publicKey, input, { username: 'bottega.digitale', password: 'second-password', totp: 'JBSWY3DPEHPK3PXP' })
       expect(second).toEqual({ id: first.id, created: false })
 
       const [row] = await db.select().from(browserAccounts).where(eq(browserAccounts.id, first.id))
       expect(row!.status).toBe('needs_login')
       expect(row!.ciphertext.includes(Buffer.from('second-password'))).toBe(false)
-      expect(JSON.parse(openSecret(runner.privateKey, first.id, row!))).toEqual({ username: 'leonessa.digital', password: 'second-password', totp: 'JBSWY3DPEHPK3PXP' })
+      expect(JSON.parse(openSecret(runner.privateKey, first.id, row!))).toEqual({ username: 'bottega.digitale', password: 'second-password', totp: 'JBSWY3DPEHPK3PXP' })
 
       const listed = await listBrowserAccounts(db, org)
-      expect(listed).toEqual([expect.objectContaining({ id: first.id, platform: 'tiktok', handle: 'leonessa.digital', status: 'needs_login' })])
+      expect(listed).toEqual([expect.objectContaining({ id: first.id, platform: 'tiktok', handle: 'bottega.digitale', status: 'needs_login' })])
       expect(Object.keys(listed[0]!)).not.toContain('ciphertext')
       expect(await listBrowserAccounts(db, 'another-org')).toEqual([])
       const kinds = (await db.select({ kind: events.kind }).from(events).where(eq(events.organizationId, org))).map(event => event.kind)
@@ -556,16 +556,16 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
     it('links LinkedIn logins to a profile or a Page, and other platforms to the account', async () => {
       const runner = runnerKeyPair()
       const member = await putBrowserAccount(db, runner.publicKey, { organizationId: org, platform: 'linkedin', handle: 'luciano-nery' }, { username: 'u', password: 'p' })
-      const pageLogin = await putBrowserAccount(db, runner.publicKey, { organizationId: org, platform: 'linkedin', handle: 'leonessa-digital' }, { username: 'u', password: 'p' })
-      const reddit = await putBrowserAccount(db, runner.publicKey, { organizationId: org, platform: 'reddit', handle: 'leonessadigital' }, { username: 'u', password: 'p' })
+      const pageLogin = await putBrowserAccount(db, runner.publicKey, { organizationId: org, platform: 'linkedin', handle: 'bottega-digitale' }, { username: 'u', password: 'p' })
+      const reddit = await putBrowserAccount(db, runner.publicKey, { organizationId: org, platform: 'reddit', handle: 'bottegadigitale' }, { username: 'u', password: 'p' })
       const profile = await linkBrowserChannel(db, org, member.id)
-      const page = await linkBrowserChannel(db, org, pageLogin.id, { page: '12345678', name: 'Leonessa Digital' })
+      const page = await linkBrowserChannel(db, org, pageLogin.id, { page: '12345678', name: 'Bottega Digitale' })
       const subreddit = await linkBrowserChannel(db, org, reddit.id)
       const rows = await db.select().from(channels).where(inArray(channels.id, [profile.channelId, page.channelId, subreddit.channelId]))
       expect(rows.map(row => [row.platform, row.kind, row.externalId, row.name]).sort()).toEqual([
-        ['linkedin', 'linkedin_page', '12345678', 'Leonessa Digital'],
+        ['linkedin', 'linkedin_page', '12345678', 'Bottega Digitale'],
         ['linkedin', 'linkedin_profile', 'luciano-nery', '@luciano-nery'],
-        ['reddit', 'reddit_account', 'leonessadigital', '@leonessadigital'],
+        ['reddit', 'reddit_account', 'bottegadigitale', '@bottegadigitale'],
       ])
       await expect(linkBrowserChannel(db, org, reddit.id, { page: '1' })).rejects.toMatchObject({ code: 'unsupported_channel' })
     })
@@ -575,10 +575,10 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
       const tiktok = new FakeAdapter()
       ;(tiktok as unknown as { platform: string }).platform = 'tiktok'
       context.adapters.set('tiktok', tiktok)
-      const account = await putBrowserAccount(db, runner.publicKey, { organizationId: org, platform: 'tiktok', handle: 'leonessa.digital' }, { username: 'u', password: 'p' })
+      const account = await putBrowserAccount(db, runner.publicKey, { organizationId: org, platform: 'tiktok', handle: 'bottega.digitale' }, { username: 'u', password: 'p' })
       const linked = await linkBrowserChannel(db, org, account.id)
       expect(await linkBrowserChannel(db, org, account.id)).toEqual({ channelId: linked.channelId, created: false })
-      expect((await listChannels(context, org)).find(channel => channel.id === linked.channelId)).toMatchObject({ kind: 'tiktok_account', status: 'needs_reauth', name: '@leonessa.digital' })
+      expect((await listChannels(context, org)).find(channel => channel.id === linked.channelId)).toMatchObject({ kind: 'tiktok_account', status: 'needs_reauth', name: '@bottega.digitale' })
 
       const loginAction = '0d9c8b7a-6f5e-4d3c-8b2a-1f0e9d8c7b6a'
       context.runner = { get: async () => ({ id: loginAction, actionId: 'login', kind: 'login', accountId: account.id, state: 'succeeded', visible: false }) } as unknown as RunnerClient
@@ -602,7 +602,7 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
         return { kind: 'published' as const, externalId: '7400000000000000000' }
       }
       expect(await runDue()).toMatchObject({ kind: 'published' })
-      expect(tiktok.published[0]).toMatchObject({ token: '', browserAccount: { id: account.id, handle: 'leonessa.digital' } })
+      expect(tiktok.published[0]).toMatchObject({ token: '', browserAccount: { id: account.id, handle: 'bottega.digitale' } })
       expect(tiktok.published[0]!.browserAccount!.sealed.ciphertext.length).toBeGreaterThan(16)
       const [attempt] = await db.select().from(attempts)
       expect(attempt!.heartbeatAt).not.toBeNull()
@@ -622,7 +622,7 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
     it('reads published posts, stores their numbers and schedules the next read', async () => {
       const { channel, job } = await published()
       expect(await collectDueMetrics(context)).toEqual({ collected: 1, failed: 0 })
-      expect(adapter.metricsCalls[0]).toMatchObject({ externalId: 'post-1', token: `token-Leonessa-secret`, channel: { id: channel.id, kind: 'facebook_page' } })
+      expect(adapter.metricsCalls[0]).toMatchObject({ externalId: 'post-1', token: `token-Bottega-secret`, channel: { id: channel.id, kind: 'facebook_page' } })
       const [row] = await db.select().from(postMetrics)
       expect(row).toMatchObject({ jobId: job.id, values: { likes: 3, comments: 1, views: 40 }, unavailable: ['reach'], failureCount: 0 })
       expect(row!.nextCollectAt.getTime() - now.getTime()).toBe(60 * 60_000)
@@ -677,7 +677,7 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
 
   describe('analytics and responses', () => {
     const minute = 60_000
-    async function published(names = ['Leonessa']) {
+    async function published(names = ['Bottega']) {
       const connected = await connect(names)
       const { jobs: created } = await submitJobs(context, submission(connected.map(channel => channel.id)))
       advance(60 * minute)
@@ -688,7 +688,7 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
       authorName: 'Mario Rossi', authorHandle: null, text: `text ${id}`, likeCount: 0, replyCount: 0, publishedAt: now, url: null, ...overrides })
     async function browserChannel() {
       const runner = runnerKeyPair()
-      const account = await putBrowserAccount(db, runner.publicKey, { organizationId: org, platform: 'reddit', handle: `leonessa-${randomUUID().slice(0, 8)}` }, { username: 'u', password: 'p' })
+      const account = await putBrowserAccount(db, runner.publicKey, { organizationId: org, platform: 'reddit', handle: `bottega-${randomUUID().slice(0, 8)}` }, { username: 'u', password: 'p' })
       return (await linkBrowserChannel(db, org, account.id)).channelId
     }
 
@@ -712,7 +712,7 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
     it('reads account numbers every six hours, keeps samples and backs off on failure', async () => {
       const [channel] = await connect()
       expect(await collectDueChannelMetrics(context)).toEqual({ collected: 1, failed: 0 })
-      expect(adapter.accountCalls[0]).toMatchObject({ token: 'token-Leonessa-secret', channel: { id: channel!.id, kind: 'facebook_page' } })
+      expect(adapter.accountCalls[0]).toMatchObject({ token: 'token-Bottega-secret', channel: { id: channel!.id, kind: 'facebook_page' } })
       const [row] = await db.select().from(channelMetrics)
       expect(row!.nextCollectAt.getTime() - now.getTime()).toBe(6 * 60 * minute)
       expect(await collectDueChannelMetrics(context)).toEqual({ collected: 0, failed: 0 })
@@ -780,7 +780,7 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
       const { jobs: [job], channels: [channel] } = await published()
       adapter.responsesWith = async () => ({ kind: 'ok', responses: [response('c2'), response('c1', { text: 'x'.repeat(6_000) }), response('c2')] })
       expect(await collectDueResponses(context)).toEqual({ checked: 1, failed: 0 })
-      expect(adapter.responseCalls[0]).toMatchObject({ externalId: 'post-1', token: 'token-Leonessa-secret' })
+      expect(adapter.responseCalls[0]).toMatchObject({ externalId: 'post-1', token: 'token-Bottega-secret' })
       const firstSeen = now
       const initial = await readResponses(context, org, { limit: 50 })
       expect(initial.responses).toHaveLength(2)
@@ -949,7 +949,7 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
     })
 
     it('pauses every channel on the provider app when the limit is the app\'s', async () => {
-      const { channels: connected } = await published(['Leonessa', 'Ruzza'])
+      const { channels: connected } = await published(['Bottega', 'Forno'])
       adapter.responsesWith = async () => { throw new RateLimited('Graph returned 400 (code 4)', 'app') }
       expect(await collectDueResponses(context)).toMatchObject({ checked: 0 })
       const paused = await db.select().from(channelMetrics)
@@ -1079,7 +1079,7 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
       }
     })
     const hook = (eventTypes: WebhookEventType[],
-      channelIds: string[] | null = null) => createWebhook(context, org, { url: 'https://hooks.example.com/social', eventTypes, channelIds, description: 'App Meatz' })
+      channelIds: string[] | null = null) => createWebhook(context, org, { url: 'https://hooks.example.com/social', eventTypes, channelIds, description: 'App Forno' })
     const bodies = () => sent.map(request => JSON.parse(request.body) as { type: string, timestamp: string, data: Record<string, unknown> })
     async function publish(channelIds: string[]) {
       const { jobs: created } = await submitJobs(context, submission(channelIds))
@@ -1092,7 +1092,7 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
       const [channel] = await connect()
       const { webhook, secret } = await hook(['comment.created'], [channel!.id])
       expect(secret).toMatch(/^whsec_/)
-      expect(webhook).toEqual({ id: expect.any(String), url: 'https://hooks.example.com/social', description: 'App Meatz', eventTypes: ['comment.created'],
+      expect(webhook).toEqual({ id: expect.any(String), url: 'https://hooks.example.com/social', description: 'App Forno', eventTypes: ['comment.created'],
         channelIds: [channel!.id], status: 'active', disabledReason: null, failingSince: null, lastDeliveredAt: null, previousSecretExpiresAt: null,
         createdAt: now.toISOString(), updatedAt: now.toISOString() })
       const [row] = await db.select().from(webhooks)
@@ -1141,18 +1141,18 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
     })
 
     it('tells of published and failed posts, only to endpoints that take them for that channel', async () => {
-      const [leonessa, other] = await connect(['Leonessa', 'Other'])
-      await hook(['post.published', 'post.failed'], [leonessa!.id])
+      const [bottega, other] = await connect(['Bottega', 'Other'])
+      await hook(['post.published', 'post.failed'], [bottega!.id])
       await hook(['comment.created'])
       adapter.outcomes = [{ kind: 'published', externalId: 'fb-1', url: 'https://facebook.com/fb-1' }]
-      const [job] = await publish([leonessa!.id, other!.id])
+      const [job] = await publish([bottega!.id, other!.id])
       await deliverDueWebhooks(context)
       expect(bodies()).toEqual([{ type: 'post.published', timestamp: now.toISOString(), data: { organizationId: org, jobId: job!.id, postId: job!.postId,
-        revision: 1, channelId: leonessa!.id, platform: 'meta', kind: 'facebook_page', externalId: 'fb-1', url: 'https://facebook.com/fb-1', publishedAt: now.toISOString() } }])
+        revision: 1, channelId: bottega!.id, platform: 'meta', kind: 'facebook_page', externalId: 'fb-1', url: 'https://facebook.com/fb-1', publishedAt: now.toISOString() } }])
 
       sent = []
       adapter.outcomes = [{ kind: 'failed', retryable: true, code: 'network', detail: 'x' }]
-      await submitJobs(context, submission([leonessa!.id]))
+      await submitJobs(context, submission([bottega!.id]))
       advance(60 * minute)
       await runDue()
       await deliverDueWebhooks(context)
@@ -1162,7 +1162,7 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
       advance(5 * minute)
       await runDue()
       await deliverDueWebhooks(context)
-      expect(bodies()).toMatchObject([{ type: 'post.failed', data: { channelId: leonessa!.id, code: 'rejected' } }])
+      expect(bodies()).toMatchObject([{ type: 'post.failed', data: { channelId: bottega!.id, code: 'rejected' } }])
     })
 
     it('tells of moving post numbers, reads watched young posts every 15 minutes, and stays quiet when nothing moved', async () => {
@@ -1200,7 +1200,7 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
     })
 
     it('tells of moving account numbers (followers, subscribers) and reads them every 30 minutes while watched', async () => {
-      const [channel, other] = await connect(['Leonessa', 'Other'])
+      const [channel, other] = await connect(['Bottega', 'Other'])
       await collectDueChannelMetrics(context)
       await hook(['channel.metrics.changed'], [channel!.id])
       const rows = await db.select().from(channelMetrics)
@@ -1212,7 +1212,7 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
       expect(await collectDueChannelMetrics(context)).toEqual({ collected: 1, failed: 0 })
       await deliverDueWebhooks(context)
       expect(bodies()).toEqual([{ type: 'channel.metrics.changed', timestamp: now.toISOString(), data: { organizationId: org, channelId: channel!.id,
-        platform: 'meta', kind: 'facebook_page', name: 'Leonessa', values: { followers: 125, views: 40 }, previous: { followers: 120, views: 40 },
+        platform: 'meta', kind: 'facebook_page', name: 'Bottega', values: { followers: 125, views: 40 }, previous: { followers: 120, views: 40 },
         changes: { followers: 5 }, unavailable: ['reach'], collectedAt: now.toISOString() } }])
       const [read] = await db.select().from(channelMetrics).where(eq(channelMetrics.channelId, channel!.id))
       expect(read!.nextCollectAt.getTime() - now.getTime()).toBe(30 * minute)
@@ -1228,7 +1228,7 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
       adapter.responsesWith = async () => ({ kind: 'ok', responses: [comment('c2', { publishedAt: at(1) }), comment('c1', { publishedAt: at(5), url: 'https://facebook.com/c1' })] })
       await collectDueResponses(context)
       advance(2 * minute)
-      adapter.responsesWith = async () => ({ kind: 'ok', responses: [comment('c3', { parentExternalId: 'c1', fromChannel: true, authorName: 'Leonessa' }),
+      adapter.responsesWith = async () => ({ kind: 'ok', responses: [comment('c3', { parentExternalId: 'c1', fromChannel: true, authorName: 'Bottega' }),
         comment('c2', { text: 'edited', likeCount: 3 })] })
       await collectDueResponses(context)
       await deliverDueWebhooks(context)
@@ -1242,7 +1242,7 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
 
     it('tells of new posts and videos on the account, wherever they were made, and of profile edits, while watched', async () => {
       const [channel] = await connect()
-      const profile = { name: 'Leonessa', username: 'leonessa', description: 'Agenzia', website: null, category: 'Web', pictureUrl: 'https://cdn.example.com/p/a.jpg?oh=1' }
+      const profile = { name: 'Bottega', username: 'bottega', description: 'Agenzia', website: null, category: 'Web', pictureUrl: 'https://cdn.example.com/p/a.jpg?oh=1' }
       const post = (id: string, minutesAgo: number, type: 'video' | 'image' = 'image') =>
         ({ externalId: id, type, text: `post ${id}`, url: `https://facebook.com/${id}`, publishedAt: new Date(now.getTime() - minutesAgo * minute) })
       adapter.activityWith = async () => ({ profile, posts: [post('old-2', 60), post('old-1', 120)] })
@@ -1267,7 +1267,7 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
       await deliverDueWebhooks(context)
       expect(bodies().map(body => [body.type, body.data.externalId, body.data.jobId])).toEqual([['channel.post.created', 'vid-1', null],
         ['channel.post.created', 'post-1', job!.id]])
-      expect(bodies()[0]).toEqual({ type: 'channel.post.created', timestamp: now.toISOString(), data: { organizationId: org, channelId: channel!.id, name: 'Leonessa',
+      expect(bodies()[0]).toEqual({ type: 'channel.post.created', timestamp: now.toISOString(), data: { organizationId: org, channelId: channel!.id, name: 'Bottega',
         platform: 'meta', kind: 'facebook_page', externalId: 'vid-1', type: 'video', text: 'post vid-1', url: 'https://facebook.com/vid-1',
         publishedAt: new Date(now.getTime() - 10 * minute).toISOString(), jobId: null, postId: null } })
       expect(bodies()[1]!.data.postId).toBe(job!.postId)
@@ -1275,15 +1275,15 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
       // A new name and bio, and an old post that scrolled into view after a deletion: only the profile is news.
       sent = []
       advance(30 * minute)
-      adapter.activityWith = async () => ({ profile: { ...profile, name: 'Leonessa Digital', description: 'Agenzia web', pictureUrl: 'https://cdn.example.com/p/b.jpg' },
+      adapter.activityWith = async () => ({ profile: { ...profile, name: 'Bottega Digitale', description: 'Agenzia web', pictureUrl: 'https://cdn.example.com/p/b.jpg' },
         posts: [post('post-1', 31), post('vid-1', 40, 'video'), post('ancient', 5 * 24 * 60)] })
       await collectDueChannelMetrics(context)
       await deliverDueWebhooks(context)
       expect(bodies()).toEqual([{ type: 'channel.profile.changed', timestamp: now.toISOString(), data: { organizationId: org, channelId: channel!.id,
-        name: 'Leonessa', platform: 'meta', kind: 'facebook_page', changed: ['name', 'description', 'pictureUrl'],
-        profile: { ...profile, name: 'Leonessa Digital', description: 'Agenzia web', pictureUrl: 'https://cdn.example.com/p/b.jpg' },
+        name: 'Bottega', platform: 'meta', kind: 'facebook_page', changed: ['name', 'description', 'pictureUrl'],
+        profile: { ...profile, name: 'Bottega Digitale', description: 'Agenzia web', pictureUrl: 'https://cdn.example.com/p/b.jpg' },
         previous: { ...profile, pictureUrl: 'https://cdn.example.com/p/a.jpg?oh=2' } } }])
-      expect(adapter.activityCalls.at(-1)).toMatchObject({ token: 'token-Leonessa-secret', channel: { id: channel!.id } })
+      expect(adapter.activityCalls.at(-1)).toMatchObject({ token: 'token-Bottega-secret', channel: { id: channel!.id } })
     })
 
     it('keeps reading account numbers when the activity read fails, and records the failure', async () => {
@@ -1301,7 +1301,7 @@ describe.skipIf(!required)('engine on PostgreSQL 17', () => {
       adapter.outcomes = [{ kind: 'failed', retryable: false, code: 'auth', detail: 'x', reauth: true }]
       await publish([channel!.id])
       await disableChannel(context, org, channel!.id)
-      adapter.accounts = [{ kind: 'facebook_page', externalId: channel!.externalId, name: 'Leonessa', token: 'token-again', tokenExpiresAt: null }]
+      adapter.accounts = [{ kind: 'facebook_page', externalId: channel!.externalId, name: 'Bottega', token: 'token-again', tokenExpiresAt: null }]
       const { state } = await startConnect(context, org, 'meta-agency')
       await finishConnect(context, org, state, 'code')
       await deliverDueWebhooks(context)

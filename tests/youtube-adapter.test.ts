@@ -31,10 +31,10 @@ const opened = empty(200, { location: session })
 
 const video = mediaFile('m1', 'ep19.mp4', 'video/mp4', Buffer.from('ftypisom-video-bytes'))
 const thumbnail = mediaFile('m2', 'thumb.jpg', 'image/jpeg', Buffer.from([0xff, 0xd8, 0xff, 0x00]))
-const settings = { title: 'Halo vs Cinder | OrbVora Duels Ep. 19 #Shorts', tags: ['orbvora'], categoryId: '20' }
+const settings = { title: 'Weekly Duel | Arcade Duels Ep. 19 #Shorts', tags: ['arcadegames'], categoryId: '20' }
 const input = (overrides: Partial<PublishInput> = {}): PublishInput => ({
-  attemptId: 'attempt-1', channel: { id: 'c1', kind: 'youtube_channel', externalId: 'UC4LhENFUrkAcWqE7K-iFj5A' }, token: 'ya29.access',
-  content: 'Play free in your browser: https://orbvora.com', media: [video], settings, ...overrides,
+  attemptId: 'attempt-1', channel: { id: 'c1', kind: 'youtube_channel', externalId: 'UCexampleChannel0000001a' }, token: 'ya29.access',
+  content: 'Play free in your browser: https://arcade.example', media: [video], settings, ...overrides,
 })
 const info = (mimeType: string, sizeBytes = 1_000): MediaInfo => ({ id: mimeType, mimeType, sizeBytes, width: null, height: null })
 
@@ -55,11 +55,11 @@ describe('YouTube connect', () => {
   it('exchanges the code and lists the channels with the refresh token', async () => {
     const { adapter, calls } = fakeGoogle([
       json({ access_token: 'ya29.new', expires_in: 3599, refresh_token: '1//refresh' }),
-      json({ items: [{ id: 'UC4LhENFUrkAcWqE7K-iFj5A', snippet: { title: 'OrbVora' } }] }),
+      json({ items: [{ id: 'UCexampleChannel0000001a', snippet: { title: 'Arcade Games' } }] }),
     ])
     const [account, ...others] = await adapter.finishConnect(app, 'oauth-code')
     expect(others).toEqual([])
-    expect(account).toMatchObject({ kind: 'youtube_channel', externalId: 'UC4LhENFUrkAcWqE7K-iFj5A', name: 'OrbVora', token: 'ya29.new', refreshToken: '1//refresh' })
+    expect(account).toMatchObject({ kind: 'youtube_channel', externalId: 'UCexampleChannel0000001a', name: 'Arcade Games', token: 'ya29.new', refreshToken: '1//refresh' })
     expect((calls[0]!.body as URLSearchParams).get('grant_type')).toBe('authorization_code')
     expect(calls[1]!.headers.Authorization).toBe('Bearer ya29.new')
   })
@@ -116,7 +116,7 @@ describe('YouTube publish', () => {
     expect(calls[0]!.url.searchParams.get('uploadType')).toBe('resumable')
     expect(calls[0]!.headers['X-Upload-Content-Length']).toBe(String(video.sizeBytes))
     expect(JSON.parse(calls[0]!.body as string)).toEqual({
-      snippet: { title: settings.title, description: input().content, tags: ['orbvora'], categoryId: '20' },
+      snippet: { title: settings.title, description: input().content, tags: ['arcadegames'], categoryId: '20' },
       status: { privacyStatus: 'public', selfDeclaredMadeForKids: false },
     })
     expect(calls[1]!.method).toBe('PUT')
@@ -176,7 +176,7 @@ describe('YouTube publish', () => {
 describe('YouTube reconcile', () => {
   const reconcile = { attemptId: 'attempt-1', channel: input().channel, token: 'ya29.access', content: 'desc', settings,
     since: new Date('2026-10-25T10:00:00Z'), excludeExternalIds: ['old1'] }
-  const uploads = json({ items: [{ id: 'UC4LhENFUrkAcWqE7K-iFj5A', contentDetails: { relatedPlaylists: { uploads: 'UU4LhENFUrkAcWqE7K-iFj5A' } } }] })
+  const uploads = json({ items: [{ id: 'UCexampleChannel0000001a', contentDetails: { relatedPlaylists: { uploads: 'UUexampleChannel0000001a' } } }] })
   const item = (videoId: string, title: string, publishedAt: string) => ({ snippet: { title, publishedAt, resourceId: { videoId } } })
 
   it('settles on the one upload with the title since the attempt', async () => {
@@ -185,7 +185,7 @@ describe('YouTube reconcile', () => {
       item('match1', settings.title, '2026-10-25T10:06:00Z'), item('other', 'Another title', '2026-10-25T10:07:00Z'),
     ] })])
     expect(await adapter.reconcile(app, reconcile)).toEqual({ kind: 'published', externalId: 'match1', url: 'https://youtu.be/match1' })
-    expect(calls[1]!.url.searchParams.get('playlistId')).toBe('UU4LhENFUrkAcWqE7K-iFj5A')
+    expect(calls[1]!.url.searchParams.get('playlistId')).toBe('UUexampleChannel0000001a')
   })
 
   it('reports no match and ambiguous matches', async () => {
@@ -196,13 +196,13 @@ describe('YouTube reconcile', () => {
 })
 
 describe('YouTube metrics', () => {
-  const metricsInput = { channel: { id: 'c1', kind: 'youtube_channel' as const, externalId: 'UC4LhENFUrkAcWqE7K-iFj5A' }, token: 'ya29.access', externalId: 'tNnu5T9_KjU' }
+  const metricsInput = { channel: { id: 'c1', kind: 'youtube_channel' as const, externalId: 'UCexampleChannel0000001a' }, token: 'ya29.access', externalId: 'vid00000001' }
 
   it('reads the video statistics and marks hidden counts unavailable', async () => {
-    const { adapter, calls } = fakeGoogle([json({ items: [{ id: 'tNnu5T9_KjU', statistics: { viewCount: '1520', commentCount: '4', favoriteCount: '0' } }] })])
+    const { adapter, calls } = fakeGoogle([json({ items: [{ id: 'vid00000001', statistics: { viewCount: '1520', commentCount: '4', favoriteCount: '0' } }] })])
     expect(await adapter.metrics(null, metricsInput)).toEqual({ values: { views: 1520, comments: 4 }, unavailable: ['likes'] })
     expect(calls[0]!.url.searchParams.get('part')).toBe('statistics')
-    expect(calls[0]!.url.searchParams.get('id')).toBe('tNnu5T9_KjU')
+    expect(calls[0]!.url.searchParams.get('id')).toBe('vid00000001')
   })
 
   it('fails when the video is gone', async () => {
@@ -212,7 +212,7 @@ describe('YouTube metrics', () => {
 })
 
 describe('YouTube analytics', () => {
-  const channel = { id: 'c1', kind: 'youtube_channel' as const, externalId: 'UC4LhENFUrkAcWqE7K-iFj5A' }
+  const channel = { id: 'c1', kind: 'youtube_channel' as const, externalId: 'UCexampleChannel0000001a' }
   const comment = (id: string, publishedAt: string, extra: Record<string, unknown> = {}) => ({ id, snippet: { authorDisplayName: '@mario', textDisplay: `text ${id}`,
     likeCount: 2, publishedAt, authorProfileImageUrl: 'https://yt3.ggpht.com/x', authorChannelUrl: 'https://www.youtube.com/@mario', ...extra } })
 
@@ -238,49 +238,49 @@ describe('YouTube analytics', () => {
         replies: { comments: [comment('Ug1.r1', '2030-01-01T11:00:00Z', { parentId: 'Ug1', authorChannelId: { value: channel.externalId } })] } }] }),
       json({ items: [{ snippet: { topLevelComment: comment('Ug0', '2030-01-01T09:00:00Z'), totalReplyCount: 0 } }] }),
     ])
-    const result = await adapter.responses(null, { channel, token: 'ya29.access', externalId: 'tNnu5T9_KjU' })
+    const result = await adapter.responses(null, { channel, token: 'ya29.access', externalId: 'vid00000001' })
     expect(result).toEqual({ kind: 'ok', responses: [
       { externalId: 'Ug1', parentExternalId: null, authorName: '@mario', authorHandle: null, text: 'text Ug1', likeCount: 2, replyCount: 1,
-        publishedAt: new Date('2030-01-01T10:00:00Z'), url: 'https://www.youtube.com/watch?v=tNnu5T9_KjU&lc=Ug1', fromChannel: false },
+        publishedAt: new Date('2030-01-01T10:00:00Z'), url: 'https://www.youtube.com/watch?v=vid00000001&lc=Ug1', fromChannel: false },
       expect.objectContaining({ externalId: 'Ug1.r1', parentExternalId: 'Ug1', replyCount: null, fromChannel: true }),
       expect.objectContaining({ externalId: 'Ug0', replyCount: 0, fromChannel: false }),
     ] })
     expect(JSON.stringify(result)).not.toContain('ggpht')
     expect(JSON.stringify(result)).not.toContain('authorChannelUrl')
     expect(JSON.stringify(result)).not.toContain('UCmario')
-    expect(Object.fromEntries(calls[0]!.url.searchParams)).toEqual({ part: 'snippet,replies', videoId: 'tNnu5T9_KjU', order: 'time', maxResults: '100', textFormat: 'plainText' })
+    expect(Object.fromEntries(calls[0]!.url.searchParams)).toEqual({ part: 'snippet,replies', videoId: 'vid00000001', order: 'time', maxResults: '100', textFormat: 'plainText' })
     expect(calls[1]!.url.searchParams.get('pageToken')).toBe('page-2')
   })
 
   it('reports disabled comments as unavailable and quota errors as rate limits', async () => {
     const { adapter } = fakeGoogle([apiError(403, 'commentsDisabled'), apiError(403, 'quotaExceeded')])
-    const input = { channel, token: 'ya29.access', externalId: 'tNnu5T9_KjU' }
+    const input = { channel, token: 'ya29.access', externalId: 'vid00000001' }
     expect(await adapter.responses(null, input)).toEqual({ kind: 'unavailable', reason: 'Comments are turned off for this video.' })
     await expect(adapter.responses(null, input)).rejects.toBeInstanceOf(RateLimited)
   })
 })
 
 describe('YouTube account activity', () => {
-  const channel = { id: 'c1', kind: 'youtube_channel' as const, externalId: 'UC4LhENFUrkAcWqE7K-iFj5A' }
+  const channel = { id: 'c1', kind: 'youtube_channel' as const, externalId: 'UCexampleChannel0000001a' }
 
   it('reads the channel profile, then its newest uploads with their privacy, two quota units', async () => {
     const { adapter, calls } = fakeGoogle([
-      json({ items: [{ snippet: { title: 'Leonessa Digital', description: 'Video', customUrl: '@leonessadigital',
+      json({ items: [{ snippet: { title: 'Bottega Digitale', description: 'Video', customUrl: '@bottegadigitale',
         thumbnails: { default: { url: 'https://yt3.ggpht.com/s88' }, high: { url: 'https://yt3.ggpht.com/s800' } } },
-        contentDetails: { relatedPlaylists: { uploads: 'UU4LhENFUrkAcWqE7K-iFj5A' } } }] }),
+        contentDetails: { relatedPlaylists: { uploads: 'UUexampleChannel0000001a' } } }] }),
       json({ items: [{ snippet: { title: 'Nuovo video', publishedAt: '2030-01-02T09:00:00Z' }, contentDetails: { videoId: 'vid2' }, status: { privacyStatus: 'private' } },
         { snippet: { title: 'Prima' }, contentDetails: { videoId: 'vid1', videoPublishedAt: '2030-01-01T09:00:00Z' }, status: { privacyStatus: 'public' } }] }),
     ])
     let spent = 0
     expect(await adapter.accountActivity(null, { channel, token: 'ya29.access', spendCall: () => { spent++ } })).toEqual({
-      profile: { name: 'Leonessa Digital', username: '@leonessadigital', description: 'Video', website: null, category: null, pictureUrl: 'https://yt3.ggpht.com/s800' },
+      profile: { name: 'Bottega Digitale', username: '@bottegadigitale', description: 'Video', website: null, category: null, pictureUrl: 'https://yt3.ggpht.com/s800' },
       posts: [
         { externalId: 'vid2', type: 'video', text: 'Nuovo video', url: 'https://www.youtube.com/watch?v=vid2', publishedAt: new Date('2030-01-02T09:00:00Z'), privacy: 'private' },
         { externalId: 'vid1', type: 'video', text: 'Prima', url: 'https://www.youtube.com/watch?v=vid1', publishedAt: new Date('2030-01-01T09:00:00Z'), privacy: 'public' },
       ],
     })
     expect(Object.fromEntries(calls[0]!.url.searchParams)).toEqual({ part: 'snippet,contentDetails', id: channel.externalId })
-    expect(Object.fromEntries(calls[1]!.url.searchParams)).toEqual({ part: 'snippet,contentDetails,status', playlistId: 'UU4LhENFUrkAcWqE7K-iFj5A', maxResults: '25' })
+    expect(Object.fromEntries(calls[1]!.url.searchParams)).toEqual({ part: 'snippet,contentDetails,status', playlistId: 'UUexampleChannel0000001a', maxResults: '25' })
     expect(spent).toBe(1)
   })
 

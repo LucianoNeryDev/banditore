@@ -7,15 +7,15 @@ const base = {
   SERVICE_TOKEN: 's'.repeat(40),
   TOKEN_KEYS: JSON.stringify({ k1: randomBytes(32).toString('base64') }),
   TOKEN_KEY_ACTIVE: 'k1',
-  META_REDIRECT_URI: 'https://dash-api-staging.leonessadigital.com/api/social/connect/meta/callback',
-  PROVIDER_APP_SECRETS: JSON.stringify({ 'meta-leonessa': 'app-secret-value' }),
+  META_REDIRECT_URI: 'https://api.example.com/api/social/connect/meta/callback',
+  PROVIDER_APP_SECRETS: JSON.stringify({ 'meta-bottega': 'app-secret-value' }),
 }
 
 describe('configuration', () => {
   it('loads a valid environment with loopback defaults', () => {
     const config = loadConfig(base)
     expect(config.host).toBe('127.0.0.1')
-    expect(config.providerSecrets.get('meta-leonessa')).toBe('app-secret-value')
+    expect(config.providerSecrets.get('meta-bottega')).toBe('app-secret-value')
     expect(config.meta.graphVersion).toBe('v26.0')
   })
 

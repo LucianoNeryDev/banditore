@@ -40,8 +40,8 @@ const instagramLogin = (replies: Reply[]) => {
   return { calls, adapter: new InstagramLoginAdapter({ version: 'v26.0', redirectUri: 'https://dash-api.example.com/ig', fetch: fetcher }) }
 }
 
-const page = { id: 'c1', kind: 'facebook_page' as const, externalId: '1288534674353714' }
-const igAccount = { id: 'c2', kind: 'instagram_account' as const, externalId: '17841400000000000', handle: 'leonessa' }
+const page = { id: 'c1', kind: 'facebook_page' as const, externalId: '1000000000000101' }
+const igAccount = { id: 'c2', kind: 'instagram_account' as const, externalId: '17841400000000000', handle: 'bottega' }
 const sendInput = (channel: SendMessageInput['channel']): SendMessageInput => ({ channel, token: 'token-abc', recipientExternalId: '24000000000000001', text: 'Ciao Mario!' })
 const since = new Date('2030-01-01T10:00:00Z')
 const findInput = (channel: FindMessageInput['channel'], overrides: Partial<FindMessageInput> = {}): FindMessageInput => ({
@@ -95,7 +95,7 @@ describe('Meta direct messages', () => {
 
   it('lists a Page\'s Messenger conversations with the other participant', async () => {
     const { adapter, calls } = meta([json({ data: [
-      { id: 't_100', updated_time: '2030-01-01T10:05:00+0000', participants: { data: [{ id: page.externalId, name: 'Leonessa' },
+      { id: 't_100', updated_time: '2030-01-01T10:05:00+0000', participants: { data: [{ id: page.externalId, name: 'Bottega' },
         { id: '24000000000000001', name: 'Mario Rossi', email: 'x@facebook.com' }] } },
       { id: 't_bad=', updated_time: '2030-01-01T10:00:00+0000' },
       { id: 't_101', updated_time: 'not a time' },
@@ -109,7 +109,7 @@ describe('Meta direct messages', () => {
 
   it('lists a Page-linked Instagram account\'s conversations through the Page token', async () => {
     const { adapter, calls } = meta([json({ data: [{ id: 'aWdfZAG06', updated_time: '2030-01-01T10:05:00+0000',
-      participants: { data: [{ id: igAccount.externalId, username: 'leonessa' }, { id: '5500', username: 'mario.rossi' }] } }] })])
+      participants: { data: [{ id: igAccount.externalId, username: 'bottega' }, { id: '5500', username: 'mario.rossi' }] } }] })])
     expect(await adapter.conversations(metaApp, { channel: igAccount, token: 'token-abc' })).toMatchObject({ kind: 'ok', conversations: [
       { externalId: 'aWdfZAG06', participant: { externalId: '5500', name: null, username: 'mario.rossi' } }] })
     expect(calls[0]!.url.pathname).toBe('/v26.0/me/conversations')
@@ -127,7 +127,7 @@ describe('Meta direct messages', () => {
 
   it('reads a conversation\'s newest 20 messages, telling the brand\'s own and dropping attachment URLs', async () => {
     const { adapter, calls } = meta([json({ id: 't_100', messages: { data: [
-      { id: 'm_2', created_time: '2030-01-01T10:05:00+0000', from: { id: page.externalId, name: 'Leonessa' }, message: 'Ciao Mario!' },
+      { id: 'm_2', created_time: '2030-01-01T10:05:00+0000', from: { id: page.externalId, name: 'Bottega' }, message: 'Ciao Mario!' },
       { id: 'm_1', created_time: '2030-01-01T10:04:00+0000', from: { id: '24000000000000001', name: 'Mario' }, message: 'Siete aperti?',
         attachments: { data: [{ mime_type: 'image/png', name: 'menu.png', image_data: { url: 'https://scontent.example/menu.png' } }] } },
     ] } })])
@@ -140,7 +140,7 @@ describe('Meta direct messages', () => {
     expect(calls[0]!.url.pathname).toBe('/v26.0/t_100')
     expect(calls[0]!.url.searchParams.get('fields')).toBe('messages.limit(20){id,created_time,from,to,message,attachments}')
     // An Instagram message from the account's own username is the brand's even without its ID.
-    const instagram = meta([json({ messages: { data: [{ id: 'aWdf1', created_time: '2030-01-01T10:05:00+0000', from: { username: 'Leonessa', id: '999' }, message: 'Ciao' }] } })])
+    const instagram = meta([json({ messages: { data: [{ id: 'aWdf1', created_time: '2030-01-01T10:05:00+0000', from: { username: 'Bottega', id: '999' }, message: 'Ciao' }] } })])
     expect((await instagram.adapter.conversationMessages(metaApp, { channel: igAccount, token: 't', conversationExternalId: 'aWdfZAG06' }))[0]!.fromChannel).toBe(true)
   })
 
@@ -198,7 +198,7 @@ describe('Meta direct messages', () => {
 describe('Instagram login direct messages', () => {
   it('reads and sends on graph.instagram.com with the account token and names its own permission', async () => {
     const { adapter, calls } = instagramLogin([
-      json({ data: [{ id: 'aWdfZAG06', updated_time: '2030-01-01T10:05:00+0000', participants: { data: [{ id: igAccount.externalId, username: 'leonessa' },
+      json({ data: [{ id: 'aWdfZAG06', updated_time: '2030-01-01T10:05:00+0000', participants: { data: [{ id: igAccount.externalId, username: 'bottega' },
         { id: '5500', username: 'mario.rossi' }] } }] }),
       json({ message_id: 'aWdf9' }),
       graphError(403, 10, { message: 'Requires instagram_business_manage_messages permission' }),

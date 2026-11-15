@@ -27,7 +27,7 @@ refresh and API calls for that channel use that app's credentials. A
 tenant-owned app may only connect that tenant's channels; an agency app may
 connect any tenant's channels.
 
-Leonessa's own channels use a Leonessa-owned app. Clients default to the
+The operator's own channels use an operator-owned app. Clients default to the
 agency app and may move to their own app later.
 
 ## Consequences
