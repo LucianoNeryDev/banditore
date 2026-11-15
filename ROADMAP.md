@@ -1,51 +1,50 @@
 # Roadmap
 
+Where Banditore is going. Palazzo is the control plane it is normally used
+with; items that need a change there say so. Released changes are in
+[CHANGELOG.md](CHANGELOG.md).
+
+Updated 2026-11-15.
+
 ## Done
 
-- Publish approved dashboard posts to Facebook Pages and Instagram through a
-  operator-owned Meta app, with pause, cancel and receipts.
-- Channel groups and automations in the dashboard: new blog articles become
-  posts, and drafts come from a brand profile, with review or automatic
-  approval.
-- Instagram reels, Instagram accounts without a Facebook Page, and YouTube
-  videos, with token renewal and an operator import for channels that came from
-  Postiz.
-- Postiz retired (2026-11-02): it has been dead since 2026-10-26, its channels
-  were imported, and the dashboard publishes through the engine only.
+- Publishing to Facebook Pages, Instagram (images, carousels and reels,
+  through a Page or Instagram's own login) and YouTube through their APIs,
+  with pause, cancel, receipts, retries and token renewal.
+- Provider apps per tenant: each channel records the app it was authorized
+  through, so a client can bring its own Meta or Google app
+  ([ADR 0002](docs/adr/0002-per-tenant-provider-apps.md)).
+- A browser runner for platforms without a usable API: TikTok, X, LinkedIn
+  (profiles and Pages), Threads, Pinterest and Reddit, posting through the
+  website. One persistent profile per account, logins sealed to the runner,
+  and a person can take over at login checkpoints.
+- Statistics: follower, view and reach history per channel, and each post's
+  likes, comments, shares, reach, views and saves, refreshed on a schedule and
+  more often while someone is looking.
+- Comments on published posts, and replies approved in Palazzo, sent once on
+  Facebook Pages, Instagram and YouTube within per-channel limits.
+- Direct messages on Facebook Pages and Instagram: conversations read, and
+  messages sent once within the 24-hour window and per-channel limits.
+- Signed webhooks for an organization's own applications: published and failed
+  posts, moving numbers, new comments, posts made elsewhere, profile edits,
+  channel status, replies and messages.
+- Postiz replaced (2026-11-02), with an operator import for the channels that
+  came from it ([ADR 0001](docs/adr/0001-own-engine-replaces-postiz.md)).
+- First public release, 0.1.0 (2026-11-13), and the rename to Banditore.
 
 ## Now
 
-- Post insights in the dashboard: likes, comments, shares, reach, views and
-  saves for each published Facebook, Instagram and YouTube post, refreshed on
-  a schedule.
-- Analytics for connected accounts and posts: follower, view and reach history
-  per channel, the history of each post's numbers, and the comments and
-  replies on published posts, refreshed every few minutes and every 30
-  seconds while someone is looking.
-- A browser driver for platforms without a usable API, starting with TikTok:
-  logins kept in a vault only the browser can open, one persistent browser
-  profile per account, and a person able to take over at login checkpoints.
-- X, LinkedIn (profiles and Pages), Threads, Pinterest and Reddit through the
-  same browser driver, posting through the website rather than the APIs.
-
-- Replies to comments on published posts, written and approved in the
-  dashboard and sent once, on Facebook Pages, Instagram and YouTube, within
-  per-channel limits.
-- Webhooks for a tenant's applications: published and failed posts, moving
-  post and account numbers (views, likes, followers and subscribers), new
-  comments, new posts and videos on the account wherever they were made,
-  profile edits, channel status and sent replies, signed and retried, with
-  faster reads while a webhook watches.
-- Direct messages on Facebook Pages and Instagram: conversations read into
-  the dashboard inbox, and messages sent once within the 24-hour window and
-  per-channel limits, by a person or an automation, with webhooks for
-  received, sent and failed messages.
+- AI answers for direct messages and comments. A decision model sorts each
+  new message or comment into answer automatically, draft for a person, or no
+  answer needed; a model drafts the reply with the conversation as context.
+  Palazzo approves, and Banditore checks its own records again before any
+  automatic send.
+- Revising a draft from a person's instruction ("make it shorter").
+- Events to Palazzo: a signed nudge when drafts, messages or reply receipts
+  change, so Palazzo reads them at once instead of on its schedule.
 
 ## Next
 
 - Hiding comments.
-- Client-owned provider apps.
-
-## Later
-
-- Agent tools with per-client limits on what can be done without approval.
+- Database and role names chosen by the operator. The migrations accept only
+  the fixed pairs listed in [docs/deploy.md](docs/deploy.md#database).
