@@ -7,7 +7,8 @@ platforms driven through a website.
 ## Database
 
 The migrations grant tables to roles that are paired with the database name,
-so use one of these combinations:
+so use one of these combinations (later migrations grant their new tables to
+the roles that already hold the earlier ones):
 
 | Database | Runtime role | Backup role |
 | --- | --- | --- |
@@ -42,6 +43,8 @@ database readiness.
 | `GOOGLE_REDIRECT_URI`, `INSTAGRAM_REDIRECT_URI` | Optional OAuth callbacks; without them those channels can only be imported |
 | `PUBLIC_MEDIA_URL` | The control plane's signed media route ([docs/api.md](api.md)); Instagram and the runner fetch media from it |
 | `RUNNER_URL`, `RUNNER_TOKEN` | Optional browser runner |
+| `ANTHROPIC_API_KEY`, `LIQUID_API_KEY` | Optional AI answers: drafting (Anthropic) and the decision (Liquid AI); redacted from logs |
+| `CONTROL_PLANE_EVENTS_URL` | Optional: the control plane's events route, `https:` or `http:` on loopback ([docs/api.md](api.md)) |
 
 ## Provider apps
 

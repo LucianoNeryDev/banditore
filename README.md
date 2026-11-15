@@ -45,9 +45,15 @@ Across all of them:
   logged-in Chromium profile per account, logins sealed to the runner's key
   (the engine stores them but cannot open them), and a person can take over at
   login checkpoints through noVNC.
+- **AI answers (optional).** Each new direct message and comment can be
+  sorted (answer automatically, draft for a person, or no answer needed) and
+  drafted with Claude for the control plane to approve. The engine still
+  sends only what was approved, and re-checks its own records before an
+  automatic send ([ADR 0004](docs/adr/0004-engine-drafts-replies.md)).
 - **Signed webhooks** ([Standard Webhooks](https://www.standardwebhooks.com/))
   for published and failed posts, moving numbers, new comments, new posts made
-  elsewhere, profile edits, channel status, replies and messages.
+  elsewhere, profile edits, channel status, replies and messages; and signed
+  events that tell the control plane when to pull.
 - **PostgreSQL only.** The `jobs` table is the queue: no Redis, Temporal or
   separate broker. Channel tokens are encrypted at rest with a rotating keyring.
 

@@ -73,6 +73,24 @@ makes no approval decisions.
 - **Delivery** — one event for one webhook, queued in the transaction that
   made the change, and sent at least once with retries; its ID lets the
   receiver drop repeats.
+- **Answering settings** — what the dashboard pushed for a tenant: whether
+  the engine decides and drafts (`drafts`), for which kinds (DMs, comments),
+  whether automatic sending is on (`enabled`), the policy, thresholds,
+  voice, preprogrammed context and **cases** (`always` or `never`, matched
+  on the author or keywords). No settings: the feature is off.
+- **Decision** — what the engine concluded about one inbound DM or comment:
+  `auto` (full: may be answered without a person), `review` (draft: a person
+  checks), `none` (needs no answer) or `skipped` (not decided; a person
+  decides), with the reason and the model's probabilities.
+- **Engine draft** — the answer the engine wrote for a decided item, with the
+  digest its unedited submission would carry. A newer draft for the same
+  conversation **supersedes** older ones. Drafts reach the dashboard through
+  the **draft outbox**.
+- **Automatic send** — a reply or message the dashboard approved
+  automatically (`approvedVia: automation`) for an engine draft. The engine
+  refuses it unless its own records pass every **guard**.
+- **Control event** — a signed nudge to the dashboard that a pull is due
+  (new drafts, message or reply receipts). It carries no content.
 - **Granted scopes** — the permissions a channel's grant holds, as the
   platform reported them at connect or renewal; **refused scopes** are those
   a platform refused on a send with an error that names them. Together they
@@ -89,3 +107,8 @@ makes no approval decisions.
   code. Replies are written and approved by people in the dashboard; direct
   messages may also come from the dashboard's rules or models. The engine
   only sends what it was given.
+- The engine may decide and draft answers (ADR 0004), in a step separate
+  from the readers that holds no sending code and writes only drafts. The
+  dashboard still approves every send; an automatic approval passes the
+  engine's own guards. In every model prompt, inbound text is data, never
+  instructions.
