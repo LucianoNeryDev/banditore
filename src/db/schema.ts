@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { bigserial, boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
+import { bigserial, boolean, check, customType, doublePrecision, index, integer, jsonb, pgTable, primaryKey, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 
 const bytea = customType<{ data: Buffer, driverData: Buffer }>({ dataType: () => 'bytea' })
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
@@ -313,6 +313,10 @@ export const responseChecks = pgTable('response_checks', {
   index('response_checks_channel').on(table.channelId),
 ])
 
+/** Who approved a reply or message: a person, or the dashboard's automatic approval of an engine draft. */
+export const approvedVia = ['person', 'automation'] as const
+export type ApprovedVia = typeof approvedVia[number]
+
 export const replyStates = ['queued', 'sending', 'sent', 'failed', 'uncertain', 'cancelled'] as const
 export type ReplyState = typeof replyStates[number]
 
@@ -338,6 +342,9 @@ export const replies = pgTable('replies', {
   text: text('text').notNull(),
   approvedByUserId: text('approved_by_user_id').notNull(),
   approvedAt: timestamp('approved_at', { withTimezone: true }).notNull(),
+  // As for outgoing messages: `automation` with the engine draft it sends.
+  approvedVia: text('approved_via').$type<ApprovedVia>().notNull().default('person'),
+  draftId: uuid('draft_id'),
   sendAt: timestamp('send_at', { withTimezone: true }).notNull(),
   state: text('state').$type<ReplyState>().notNull().default('queued'),
   // Next claim while queued, next look at the platform while uncertain.
@@ -372,6 +379,8 @@ export const replies = pgTable('replies', {
   check('replies_counts', sql`attempt_count >= 0 and reconcile_count >= 0 and reconcile_misses >= 0`),
   check('replies_settled_by', sql`settled_by is null or settled_by in ('worker', 'reconcile', 'operator')`),
   check('replies_resolution', sql`resolution is null or resolution in ('sent', 'not_sent')`),
+  check('replies_approved_via', sql`approved_via in ('person', 'automation') and (approved_via = 'automation') = (draft_id is not null)`),
+  uniqueIndex('replies_draft').on(table.draftId).where(sql`draft_id is not null`),
   unique('replies_request_key').on(table.requestKey),
   unique('replies_revision_unique').on(table.organizationId, table.replyId, table.revision),
   index('replies_due').on(table.notBefore).where(sql`state = 'queued' or reconciling`),
@@ -536,6 +545,8 @@ export const directMessages = pgTable('direct_messages', {
   unique('direct_messages_channel_external').on(table.channelId, table.externalId),
   index('direct_messages_conversation').on(table.conversationId, table.sentAt, table.id),
   index('direct_messages_sent').on(table.sentAt),
+  // The answering step looks for a tenant's newly stored inbound messages.
+  index('direct_messages_inbound').on(table.organizationId, table.firstSeenAt).where(sql`direction = 'in'`),
 ])
 
 export const outgoingMessageStates = ['queued', 'sending', 'sent', 'failed', 'uncertain', 'cancelled'] as const
@@ -560,6 +571,9 @@ export const outgoingMessages = pgTable('outgoing_messages', {
   text: text('text').notNull(),
   approvedByUserId: text('approved_by_user_id').notNull(),
   approvedAt: timestamp('approved_at', { withTimezone: true }).notNull(),
+  // `automation`: the dashboard approved an engine draft automatically; the engine checked its own record of it (`draft_id`).
+  approvedVia: text('approved_via').$type<ApprovedVia>().notNull().default('person'),
+  draftId: uuid('draft_id'),
   sendAt: timestamp('send_at', { withTimezone: true }).notNull(),
   state: text('state').$type<OutgoingMessageState>().notNull().default('queued'),
   // Next claim while queued, next look at the platform while uncertain.
@@ -589,6 +603,9 @@ export const outgoingMessages = pgTable('outgoing_messages', {
   check('outgoing_messages_counts', sql`attempt_count >= 0 and reconcile_count >= 0 and reconcile_misses >= 0`),
   check('outgoing_messages_settled_by', sql`settled_by is null or settled_by in ('worker', 'reconcile', 'operator')`),
   check('outgoing_messages_resolution', sql`resolution is null or resolution in ('sent', 'not_sent')`),
+  check('outgoing_messages_approved_via', sql`approved_via in ('person', 'automation') and (approved_via = 'automation') = (draft_id is not null)`),
+  // One automatic send per engine draft.
+  uniqueIndex('outgoing_messages_draft').on(table.draftId).where(sql`draft_id is not null`),
   unique('outgoing_messages_request_key').on(table.requestKey),
   unique('outgoing_messages_revision_unique').on(table.organizationId, table.messageId, table.revision),
   index('outgoing_messages_due').on(table.notBefore).where(sql`state = 'queued' or reconciling`),
@@ -701,4 +718,151 @@ export const channelActivity = pgTable('channel_activity', {
   check('channel_activity_failure_count', sql`failure_count >= 0`),
   check('channel_activity_seen_size', sql`coalesce(cardinality(seen_post_ids), 0) <= 200`),
   index('channel_activity_organization').on(table.organizationId),
+])
+
+export const caseEffects = ['always', 'never'] as const
+export type CaseEffect = typeof caseEffects[number]
+export const replyModelChoices = ['haiku', 'sonnet', 'opus'] as const
+export type ReplyModelChoice = typeof replyModelChoices[number]
+
+/**
+ * One case of answering: `never` keeps what it matches for a person,
+ * `always` answers it without asking the decision model. Every condition it
+ * sets holds; each list is any of its values, an empty list no condition.
+ */
+export interface AnsweringCase {
+  id: string
+  effect: CaseEffect
+  label: string
+  /** Usernames or names of the person writing, `@` and case ignored. */
+  authors: string[]
+  /** Words or phrases in the text, case and accents ignored. */
+  keywords: string[]
+  /** The channels it applies to; empty: every channel. */
+  channelIds: string[]
+}
+
+/** A tenant's answering settings, as the dashboard resolved them (global with the tenant's overrides). */
+export interface AnsweringSettings {
+  /** Automatic sending: off, an `auto` decision becomes `review`. */
+  enabled: boolean
+  /** Decide and draft at all; items first seen after it was switched on are processed. */
+  drafts: boolean
+  kinds: { messages: boolean, comments: boolean }
+  decisionModel: string
+  decisionPrompt: string
+  decisionThreshold: number
+  noneThreshold: number
+  replyModel: ReplyModelChoice
+  voice: string
+  replyContext: string
+  delaySeconds: number
+  cases: AnsweringCase[]
+}
+
+export interface AnsweringContextEntry {
+  id: string
+  topic: string
+  body: string
+}
+
+/** What the dashboard pushed last. No row: the feature is off for the tenant. */
+export const answeringSettings = pgTable('answering_settings', {
+  organizationId: text('organization_id').primaryKey(),
+  version: integer('version').notNull(),
+  settings: jsonb('settings').$type<AnsweringSettings>().notNull(),
+  context: jsonb('context').$type<AnsweringContextEntry[]>().notNull().default([]),
+  // When `drafts` was last switched on: inbound items first seen before it are never processed.
+  draftsEnabledAt: timestamp('drafts_enabled_at', { withTimezone: true }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, () => [
+  check('answering_settings_version', sql`version > 0`),
+  check('answering_settings_size', sql`pg_column_size(settings) + pg_column_size(context) <= 1048576`),
+])
+
+export const draftKinds = ['message', 'comment'] as const
+export type DraftKind = typeof draftKinds[number]
+/** `auto` (full), `review` (draft), `none` (no answer needed), `skipped` (not decided: treated as review). */
+export const decisionOutcomes = ['auto', 'review', 'none', 'skipped'] as const
+export type DecisionOutcome = typeof decisionOutcomes[number]
+
+/**
+ * The engine's decision about one inbound DM or comment, and its draft. The
+ * draft is model output about third-party content: it goes with the inbound
+ * rows (180 days, or when the channel is disabled).
+ */
+export const inboundDrafts = pgTable('inbound_drafts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: text('organization_id').notNull(),
+  channelId: uuid('channel_id').notNull().references(() => channels.id, { onDelete: 'cascade' }),
+  kind: text('kind').$type<DraftKind>().notNull(),
+  conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'cascade' }),
+  responseId: uuid('response_id').references(() => postResponses.id, { onDelete: 'cascade' }),
+  // The direct message's or comment's platform ID.
+  inboundExternalId: text('inbound_external_id').notNull(),
+  outcome: text('outcome').$type<DecisionOutcome>().notNull(),
+  reason: text('reason').notNull(),
+  decisionModel: text('decision_model'),
+  probabilities: jsonb('probabilities').$type<{ full: number, draft: number, none: number }>(),
+  confidence: doublePrecision('confidence'),
+  caseId: text('case_id'),
+  decisionThreshold: doublePrecision('decision_threshold').notNull(),
+  noneThreshold: doublePrecision('none_threshold').notNull(),
+  // What the decision call cost (USD), as reported.
+  cost: doublePrecision('cost'),
+  errorCode: text('error_code'),
+  draftText: text('draft_text'),
+  // The digest the dashboard's submission of the unedited draft carries (`social-message-v1` or `social-reply-v1`).
+  draftDigest: text('draft_digest'),
+  draftModel: text('draft_model'),
+  draftLanguage: text('draft_language'),
+  draftFlags: text('draft_flags').array().notNull().default(sql`'{}'::text[]`),
+  draftErrorCode: text('draft_error_code'),
+  settingsVersion: integer('settings_version').notNull(),
+  supersededBy: uuid('superseded_by'),
+  supersededAt: timestamp('superseded_at', { withTimezone: true }),
+  // In the dashboard's outbox until acknowledged; a draft superseded later comes back once more.
+  outboxPending: boolean('outbox_pending').notNull().default(true),
+  outboxAt: timestamp('outbox_at', { withTimezone: true }).notNull(),
+  deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+  createdAt: createdAt(),
+}, table => [
+  check('inbound_drafts_kind', oneOf('kind', draftKinds)),
+  check('inbound_drafts_outcome', oneOf('outcome', decisionOutcomes)),
+  check('inbound_drafts_target', sql`(kind = 'message') = (conversation_id is not null) and (kind = 'comment') = (response_id is not null)`),
+  check('inbound_drafts_text_length', sql`char_length(draft_text) between 1 and 10000`),
+  check('inbound_drafts_digest', sql`(draft_text is null) = (draft_digest is null) and (draft_digest is null or draft_digest ~ '^[0-9a-f]{64}$')`),
+  // One decision per inbound DM and per comment.
+  uniqueIndex('inbound_drafts_message').on(table.conversationId, table.inboundExternalId).where(sql`kind = 'message'`),
+  uniqueIndex('inbound_drafts_comment').on(table.responseId).where(sql`kind = 'comment'`),
+  index('inbound_drafts_outbox').on(table.outboxAt, table.id).where(sql`outbox_pending`),
+  index('inbound_drafts_superseded_by').on(table.supersededBy).where(sql`superseded_by is not null`),
+  // The channel cascade, a disable, and retention.
+  index('inbound_drafts_channel').on(table.channelId),
+  index('inbound_drafts_created').on(table.createdAt),
+])
+
+export const controlEventTypes = ['drafts.available', 'messages.changed', 'replies.changed'] as const
+export type ControlEventType = typeof controlEventTypes[number]
+
+/**
+ * Nudges for the control plane: one pending row per (type, organization),
+ * so events coalesce and survive a restart. `generation` moves when a new
+ * change joins a row being sent, so its success does not swallow the change.
+ */
+export const controlEvents = pgTable('control_events', {
+  type: text('type').$type<ControlEventType>().notNull(),
+  organizationId: text('organization_id').notNull(),
+  eventId: uuid('event_id').notNull(),
+  generation: integer('generation').notNull().default(1),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, table => [
+  primaryKey({ columns: [table.type, table.organizationId] }),
+  check('control_events_type', oneOf('type', controlEventTypes)),
+  check('control_events_counts', sql`attempt_count >= 0 and generation > 0`),
+  index('control_events_due').on(table.nextAttemptAt),
 ])
