@@ -17,6 +17,7 @@ import { normalizeReplyText } from './platforms/reply-match.js'
 import { RateLimited, type FindReplyOutcome, type MessageRules, type SendMessageOutcome } from './platforms/types.js'
 import { messageAvailability, permissionName } from './reply-availability.js'
 import { changeChannelStatus, emitMessageOutcome } from './webhooks.js'
+import { messageDigest } from './digests.js'
 import { approvalFields, approvalRefinement, approvalRefinementMessage, checkAutomation } from './answering/drafts.js'
 import { queueControlEvent } from './control-events.js'
 import type { ApprovedVia } from './db/schema.js'
@@ -49,10 +50,7 @@ export const messagesIntervalMs = 5_000
 const messagesPerPass = 10
 const reconcilesPerPass = 5
 
-/** What a message binds: the conversation and the exact text. The dashboard computes the same value. */
-export function messageDigest(input: { conversationId: string, text: string }) {
-  return sha256Json(['social-message-v1', input.conversationId, input.text])
-}
+export { messageDigest }
 
 /** One key per (organization, dashboard message, revision, digest): a second submission of it is the same message. */
 export function messageRequestKey(organizationId: string, messageId: string, revision: number, digest: string) {

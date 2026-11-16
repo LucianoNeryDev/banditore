@@ -14,6 +14,7 @@ import { normalizeReplyText } from './platforms/reply-match.js'
 import { RateLimited, type FindReplyOutcome, type ReplyOutcome } from './platforms/types.js'
 import { permissionName, replyAvailability } from './reply-availability.js'
 import { changeChannelStatus, emitReplyOutcome } from './webhooks.js'
+import { replyDigest } from './digests.js'
 import { approvalFields, approvalRefinement, approvalRefinementMessage, checkAutomation } from './answering/drafts.js'
 import { queueControlEvent } from './control-events.js'
 import type { ApprovedVia } from './db/schema.js'
@@ -55,10 +56,7 @@ const reconcilesPerPass = 5
 
 export const replyRetryDelayMs = sendRetryDelayMs
 
-/** What a reply binds: the post (job), the comment answered and the exact text. The dashboard computes the same value. */
-export function replyDigest(input: { jobId: string, parentExternalId: string, text: string }) {
-  return sha256Json(['social-reply-v1', input.jobId, input.parentExternalId, input.text])
-}
+export { replyDigest }
 
 /** One key per (organization, dashboard reply, revision, digest): a second submission of it is the same reply. */
 export function replyRequestKey(organizationId: string, replyId: string, revision: number, digest: string) {
