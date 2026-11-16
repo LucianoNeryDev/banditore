@@ -17,6 +17,10 @@ import { normalizeReplyText } from './platforms/reply-match.js'
 import { RateLimited, type FindReplyOutcome, type MessageRules, type SendMessageOutcome } from './platforms/types.js'
 import { messageAvailability, permissionName } from './reply-availability.js'
 import { changeChannelStatus, emitMessageOutcome } from './webhooks.js'
+import { messageDigest } from './digests.js'
+import { approvalFields, approvalRefinement, approvalRefinementMessage, checkAutomation } from './answering/drafts.js'
+import { queueControlEvent } from './control-events.js'
+import type { ApprovedVia } from './db/schema.js'
 
 // Direct messages, send side: the exactly-once contract of comment
 // replies, for one table of outgoing messages.
@@ -46,10 +50,7 @@ export const messagesIntervalMs = 5_000
 const messagesPerPass = 10
 const reconcilesPerPass = 5
 
-/** What a message binds: the conversation and the exact text. The dashboard computes the same value. */
-export function messageDigest(input: { conversationId: string, text: string }) {
-  return sha256Json(['social-message-v1', input.conversationId, input.text])
-}
+export { messageDigest }
 
 /** One key per (organization, dashboard message, revision, digest): a second submission of it is the same message. */
 export function messageRequestKey(organizationId: string, messageId: string, revision: number, digest: string) {
@@ -79,7 +80,8 @@ export const messageSubmissionSchema = z.strictObject({
   approvedByUserId: dashboardIdentifier,
   approvedAt: z.iso.datetime({ offset: true }),
   sendAt: z.iso.datetime({ offset: true }),
-})
+  ...approvalFields,
+}).refine(approvalRefinement, approvalRefinementMessage)
 export type MessageSubmission = z.infer<typeof messageSubmissionSchema>
 
 const lockRequestKey = (executor: Executor, organizationId: string, requestKey: string) => advisoryLock(executor, `message-key:${organizationId}:${requestKey}`)
@@ -93,6 +95,9 @@ export interface OutgoingMessageView {
   digest: string | null
   conversationId: string | null
   channelId: string | null
+  /** `person`, or `automation` with the engine draft it sends. */
+  approvedVia: ApprovedVia | null
+  draftId: string | null
   state: OutgoingMessageState
   errorCode: string | null
   permission: string | null
@@ -119,7 +124,8 @@ export function notSentAllowed(message: Pick<Outgoing, 'state' | 'reconciling' |
 export function outgoingView(message: Outgoing, directMessageId: string | null = null): OutgoingMessageView {
   return {
     id: message.id, requestKey: message.requestKey, messageId: message.messageId, revision: message.revision, digest: message.digest,
-    conversationId: message.conversationId, channelId: message.channelId, state: message.state, errorCode: message.errorCode,
+    conversationId: message.conversationId, channelId: message.channelId, approvedVia: message.approvedVia, draftId: message.draftId, state: message.state,
+    errorCode: message.errorCode,
     permission: message.permission ? permissionName(message.permission) : null, platformMessageId: message.platformMessageId, url: null, attemptCount: message.attemptCount,
     reconciling: message.reconciling, sendAt: message.sendAt.toISOString(), attemptedAt: message.attemptedAt?.toISOString() ?? null,
     settledAt: message.settledAt?.toISOString() ?? null, settledBy: message.settledBy ?? null, directMessageId, resolution: message.resolution ?? null,
@@ -131,7 +137,8 @@ function tombstoneView(row: typeof outgoingMessageCancellations.$inferSelect, in
   const at = row.createdAt.toISOString()
   return {
     id: null, requestKey: row.requestKey, messageId: input?.messageId ?? null, revision: input?.revision ?? null, digest: input?.digest ?? null,
-    conversationId: input?.conversationId ?? null, channelId: null, state: 'cancelled', errorCode: 'cancelled_before_submit', permission: null,
+    conversationId: input?.conversationId ?? null, channelId: null, approvedVia: input ? input.approvedVia ?? 'person' : null, draftId: input?.draftId ?? null,
+    state: 'cancelled', errorCode: 'cancelled_before_submit', permission: null,
     platformMessageId: null, url: null, attemptCount: 0, reconciling: false, sendAt: input ? new Date(input.sendAt).toISOString() : null, attemptedAt: null,
     settledAt: at, settledBy: null, directMessageId: null, resolution: null, notSentAllowed: false, updatedAt: at,
   }
@@ -173,6 +180,7 @@ export async function submitMessage(context: EngineContext, organizationId: stri
   if (messageRequestKey(organizationId, input.messageId, input.revision, digest) !== input.requestKey) throw invalid('request_key_mismatch', 'Unexpected request key')
   const sendAt = new Date(input.sendAt)
   if (sendAt.getTime() < Date.parse(input.approvedAt)) throw invalid('invalid_send_at', 'sendAt must not be before approvedAt')
+  const approvedVia: ApprovedVia = input.approvedVia ?? 'person'
   return context.db.transaction(async transaction => {
     const now = clock(context)
     await lockRequestKey(transaction, organizationId, input.requestKey)
@@ -181,6 +189,7 @@ export async function submitMessage(context: EngineContext, organizationId: stri
       const same = existing.organizationId === organizationId && existing.messageId === input.messageId && existing.revision === input.revision
         && existing.conversationId === input.conversationId && existing.text === input.text && existing.approvedByUserId === input.approvedByUserId
         && existing.approvedAt.getTime() === Date.parse(input.approvedAt) && existing.sendAt.getTime() === sendAt.getTime()
+        && existing.approvedVia === approvedVia && existing.draftId === (input.draftId ?? null)
       if (!same) throw conflict('revision_conflict', 'This request key was already submitted with other values')
       return { message: outgoingView(existing, await directMessageIdOf(transaction, existing)), created: false }
     }
@@ -194,6 +203,11 @@ export async function submitMessage(context: EngineContext, organizationId: stri
       throw conflict('too_late', 'The message arrived more than five minutes after its send time; submit it again', { maxLatenessMs: maxSubmissionLatenessMs })
     }
     if (sendAt.getTime() - now.getTime() > maxSendAheadMs) throw invalid('invalid_send_at', 'sendAt must be within the next hour')
+    // An automatic send of an engine draft: the engine's own records must allow it (ADR 0004).
+    if (approvedVia === 'automation') {
+      await checkAutomation(transaction, organizationId, { kind: 'message', conversationId: input.conversationId, draftId: input.draftId!,
+        revision: input.revision, digest, sendAt })
+    }
 
     const [conversation] = await transaction.select().from(conversations)
       .where(and(eq(conversations.organizationId, organizationId), eq(conversations.id, input.conversationId))).limit(1)
@@ -229,11 +243,12 @@ export async function submitMessage(context: EngineContext, organizationId: stri
 
     const [created] = await transaction.insert(outgoingMessages).values({
       organizationId, channelId: channel.id, conversationId: conversation.id, requestKey: input.requestKey, messageId: input.messageId, revision: input.revision,
-      digest, text: input.text, approvedByUserId: input.approvedByUserId, approvedAt: new Date(input.approvedAt), sendAt,
+      digest, text: input.text, approvedByUserId: input.approvedByUserId, approvedAt: new Date(input.approvedAt), approvedVia, draftId: input.draftId ?? null, sendAt,
       notBefore: new Date(Math.max(now.getTime(), sendAt.getTime())), createdAt: now, updatedAt: now,
     }).returning()
     await recordEvent(transaction, { organizationId, kind: 'message.queued', channelId: channel.id,
-      detail: { messageId: input.messageId, revision: input.revision, conversationId: conversation.id, approvedByUserId: input.approvedByUserId } })
+      detail: { messageId: input.messageId, revision: input.revision, conversationId: conversation.id, approvedByUserId: input.approvedByUserId, approvedVia,
+        ...(input.draftId ? { draftId: input.draftId } : {}) } })
     return { message: outgoingView(created!), created: true }
   })
 }
@@ -461,6 +476,7 @@ export async function settleMessage(context: EngineContext, claimed: ClaimedMess
       detail: outcome.kind === 'sent' ? { platformMessageId: outcome.externalId } : { code: outcome.code } })
     // A message a person already said was sent is not announced twice.
     if ((values.state === 'sent' || values.state === 'failed') && message.state !== values.state) await emitMessageOutcome(transaction, message.id, now)
+    else if (values.state === 'uncertain') await queueControlEvent(transaction, 'messages.changed', message.organizationId, now)
   })
 }
 
@@ -475,6 +491,7 @@ export async function sweepMessages(context: EngineContext) {
       await transaction.update(outgoingMessages).set({ state: 'uncertain', errorCode: 'abandoned', reconciling: true, reconcileCount: 0, reconcileMisses: 0,
         leaseUntil: null, notBefore: new Date(Math.max(now.getTime(), first)), updatedAt: now }).where(eq(outgoingMessages.id, message.id))
       await recordEvent(transaction, { organizationId: message.organizationId, kind: 'message.uncertain', channelId: message.channelId, detail: { reason: 'abandoned' } })
+      await queueControlEvent(transaction, 'messages.changed', message.organizationId, now)
     }
     return open.map(message => message.id)
   })

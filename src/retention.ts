@@ -3,7 +3,7 @@ import { clock, recordEvent, type EngineContext } from './context.js'
 import type { Executor } from './db/client.js'
 import { deleteExpiredDeliveries } from './webhooks.js'
 import {
-  channelMetricSamples, channels, conversations, directMessages, jobs, outgoingMessageCancellations, outgoingMessages, postMetricSamples, postResponses, replies,
+  channelMetricSamples, channels, conversations, directMessages, inboundDrafts, jobs, outgoingMessageCancellations, outgoingMessages, postMetricSamples, postResponses, replies,
   replyCancellations, responseChecks,
 } from './db/schema.js'
 
@@ -16,6 +16,8 @@ export const responsesRetentionMs = 180 * dayMs
 export const replyCancellationsRetentionMs = 30 * dayMs
 /** Direct messages are third-party personal data too: kept 180 days after they were sent. */
 export const messagesRetentionMs = 180 * dayMs
+/** Engine decisions and drafts about inbound DMs and comments: as long as those. */
+export const draftsRetentionMs = 180 * dayMs
 /** A reply that retention settled stays this long, so the dashboard can read what became of it. */
 export const settledReplyGraceMs = dayMs
 /** How often the worker deletes what has expired. */
@@ -61,8 +63,11 @@ export async function applyRetention(context: EngineContext) {
   await context.db.delete(replyCancellations).where(lt(replyCancellations.createdAt, new Date(now - replyCancellationsRetentionMs)))
   const conversationsExpired = await expireConversations(context.db, now)
   const webhookDeliveries = await deleteExpiredDeliveries(context.db, at)
+  // Decisions and drafts answer inbound rows: they go after as long, and with a disabled channel (the cascades cover the rest).
+  const drafts = await context.db.delete(inboundDrafts).where(or(lt(inboundDrafts.createdAt, new Date(now - draftsRetentionMs)),
+    inArray(inboundDrafts.channelId, disabledChannels))).returning({ id: inboundDrafts.id })
   return { postMetricSamples: postSamples.length, channelMetricSamples: channelSamples.length, responses: expired.length + disabled.length,
-    replies: expiredReplies.length + disabledReplies.length, ...conversationsExpired, webhookDeliveries }
+    replies: expiredReplies.length + disabledReplies.length, ...conversationsExpired, webhookDeliveries, drafts: drafts.length }
 }
 
 /** Outgoing messages that are settled and no longer looked for. Queued, sending and uncertain ones settle within a day of their send time. */
@@ -94,8 +99,9 @@ export async function forgetChannelConversations(executor: Executor, channelId: 
   await executor.delete(conversations).where(eq(conversations.channelId, channelId))
 }
 
-/** Responses, check state and replies of one channel, removed when it is disabled. */
+/** Responses, check state, replies and engine drafts of one channel, removed when it is disabled. */
 export async function forgetChannelResponses(executor: Executor, channelId: string) {
+  await executor.delete(inboundDrafts).where(eq(inboundDrafts.channelId, channelId))
   await executor.delete(postResponses).where(eq(postResponses.channelId, channelId))
   await executor.delete(responseChecks).where(eq(responseChecks.channelId, channelId))
   await executor.delete(replies).where(eq(replies.channelId, channelId))

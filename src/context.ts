@@ -7,6 +7,8 @@ import type { PublicMedia } from './media.js'
 import type { RunnerClient } from './platforms/browser/runner-client.js'
 import type { PlatformAdapter, ResolvedProviderApp } from './platforms/types.js'
 import type { WebhookSender } from './webhook-sender.js'
+import type { DecisionModel } from './answering/decision.js'
+import type { DraftModel } from './answering/drafting.js'
 
 export interface EngineContext {
   db: Database
@@ -19,6 +21,10 @@ export interface EngineContext {
   runner?: RunnerClient
   /** Sends webhook requests; the public-HTTPS-only sender when absent. */
   webhookSender?: WebhookSender
+  /** The decision model (Liquid AI); without it every decision is `skipped`. */
+  decisionModel?: DecisionModel
+  /** The drafting model (Anthropic); without it nothing is drafted. Neither model has tools. */
+  draftModel?: DraftModel
   now?: () => Date
 }
 

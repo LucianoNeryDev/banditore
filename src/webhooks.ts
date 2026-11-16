@@ -9,6 +9,7 @@ import {
 } from './db/schema.js'
 import { conflict, invalid, notFound } from './errors.js'
 import { errorFields, log } from './log.js'
+import { queueControlEvent } from './control-events.js'
 import { createWebhookSender, newWebhookSecret, signWebhook, webhookUrlProblem, type WebhookResult } from './webhook-sender.js'
 
 const minuteMs = 60_000
@@ -234,10 +235,13 @@ export async function webhookWatches(executor: Executor, organizationId: string,
   return Boolean(row)
 }
 
-/** `reply.sent` or `reply.failed` for a comment reply that just settled that way, in the settling transaction. */
+/** `reply.sent` or `reply.failed` for a comment reply that just settled that way (or was cancelled by a pause), in the settling transaction. */
 export async function emitReplyOutcome(executor: Executor, id: string, now: Date) {
   const [reply] = await executor.select().from(replies).where(eq(replies.id, id)).limit(1)
-  if (!reply || (reply.state !== 'sent' && reply.state !== 'failed')) return 0
+  if (!reply) return 0
+  // The control plane hears that a receipt changed (ADR 0005), whatever the tenant's webhooks take.
+  await queueControlEvent(executor, 'replies.changed', reply.organizationId, now)
+  if (reply.state !== 'sent' && reply.state !== 'failed') return 0
   const [job] = await executor.select({ postId: jobs.postId }).from(jobs).where(eq(jobs.id, reply.jobId)).limit(1)
   return emitWebhookEvents(executor, { organizationId: reply.organizationId, type: reply.state === 'sent' ? 'reply.sent' : 'reply.failed',
     channelId: reply.channelId, occurredAt: now, items: [{ replyId: reply.replyId, revision: reply.revision, requestKey: reply.requestKey, jobId: reply.jobId,
@@ -245,10 +249,12 @@ export async function emitReplyOutcome(executor: Executor, id: string, now: Date
       errorCode: reply.errorCode, settledBy: reply.settledBy }] })
 }
 
-/** `message.sent` or `message.failed` for a direct message that just settled that way, in the settling transaction. */
+/** `message.sent` or `message.failed` for a direct message that just settled that way (or was cancelled by a pause), in the settling transaction. */
 export async function emitMessageOutcome(executor: Executor, id: string, now: Date) {
   const [message] = await executor.select().from(outgoingMessages).where(eq(outgoingMessages.id, id)).limit(1)
-  if (!message || (message.state !== 'sent' && message.state !== 'failed')) return 0
+  if (!message) return 0
+  await queueControlEvent(executor, 'messages.changed', message.organizationId, now)
+  if (message.state !== 'sent' && message.state !== 'failed') return 0
   const [conversation] = await executor.select({ platform: conversations.platform }).from(conversations).where(eq(conversations.id, message.conversationId)).limit(1)
   return emitWebhookEvents(executor, { organizationId: message.organizationId, type: message.state === 'sent' ? 'message.sent' : 'message.failed',
     channelId: message.channelId, occurredAt: now, items: [{ messageId: message.messageId, revision: message.revision, requestKey: message.requestKey,

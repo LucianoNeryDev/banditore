@@ -211,13 +211,13 @@ requestKey = sha256(JSON.stringify(['social-reply-send-v1', organizationId, repl
 
 | Route | Purpose |
 | --- | --- |
-| `POST /v1/tenants/:org/replies` | `{requestKey, replyId, revision, digest, jobId, parentExternalId, text, approvedByUserId, approvedAt, sendAt}` → `201 {reply}`. The same key with the same fields returns the stored reply (`200`), whatever the time; a new key more than five minutes past `sendAt` is `409 too_late`. |
+| `POST /v1/tenants/:org/replies` | `{requestKey, replyId, revision, digest, jobId, parentExternalId, text, approvedByUserId, approvedAt, sendAt, approvedVia?, draftId?}` → `201 {reply}`. `approvedVia` is `person` (the default) or `automation` with the `draftId` of an engine draft; see "Automatic sends". The same key with the same fields returns the stored reply (`200`), whatever the time; a new key more than five minutes past `sendAt` is `409 too_late`. |
 | `GET /v1/tenants/:org/replies?requestKeys=a,b` | 1-50 keys → `{replies}`, the tenant's replies with those keys. |
 | `POST /v1/tenants/:org/replies/:requestKey/cancel` | Withdraws a reply not yet claimed → `{reply}`; `409 too_late` (with `detail.state`) after. A key the engine has not received is remembered for 30 days as cancelled, so its submission is refused. |
 | `POST /v1/tenants/:org/replies/:requestKey/resolve` | `{outcome: 'sent' \| 'not_sent'}` for an `uncertain` reply → `{reply}`; `409 not_uncertain` otherwise. `not_sent` only once the 15-minute look found nothing or the looks stopped, else `409 still_checking`. Sends nothing. |
 
 A reply: `{id, requestKey, replyId, revision, digest, jobId, channelId,
-parentExternalId, targetExternalId, state, errorCode, permission,
+parentExternalId, targetExternalId, approvedVia, draftId, state, errorCode, permission,
 platformReplyId, url, attemptCount, reconciling, sendAt, attemptedAt,
 settledAt, settledBy, responseId, resolution, notSentAllowed, updatedAt}`.
 A cancelled key the engine never received has `id: null` and only the
@@ -233,7 +233,8 @@ missing_permission` (`detail.permission`), `paused`, `channel_inactive`,
 channel; on YouTube also 20 a Pacific day per Google provider app, across
 tenants), `comment_gone` (the comment is not a stored response of that post,
 or the post is not published), `not_supported` and `revision_conflict` (the
-key was used with other fields, or the revision under another key).
+key was used with other fields, or the revision under another key), and the
+`guard_*` codes of an automatic send.
 
 States: `queued`, `sending`, `sent`, `failed`, `uncertain`, `cancelled`.
 
@@ -288,7 +289,8 @@ Instagram accounts (Page-linked and Instagram login), and sends text messages
 the dashboard submits, each at most once, under the same contract as replies.
 Who decides what to send (a person, a rule or a model) is the dashboard's
 business; the engine stores what it reads, sends what it was given and
-reports what happened. Browser channels and YouTube have no messages.
+reports what happened. It may also draft answers for the dashboard (see "AI
+answers"), but it only sends what the dashboard submits. Browser channels and YouTube have no messages.
 
 | Channel | Read | Send | Permission | Longest text |
 | --- | --- | --- | --- | --- |
@@ -351,13 +353,13 @@ requestKey = sha256(JSON.stringify(['social-message-send-v1', organizationId, me
 
 | Route | Purpose |
 | --- | --- |
-| `POST /v1/tenants/:org/messages` | `{requestKey, messageId, revision, digest, conversationId, text, approvedByUserId, approvedAt, sendAt}` → `201 {message}`; the same key with the same fields returns the stored one (`200`), whatever the time. `sendAt` is at most an hour ahead; a new key more than five minutes past it is `409 too_late`. |
+| `POST /v1/tenants/:org/messages` | `{requestKey, messageId, revision, digest, conversationId, text, approvedByUserId, approvedAt, sendAt, approvedVia?, draftId?}` → `201 {message}` (`approvedVia` as for replies); the same key with the same fields returns the stored one (`200`), whatever the time. `sendAt` is at most an hour ahead; a new key more than five minutes past it is `409 too_late`. |
 | `GET /v1/tenants/:org/messages?conversationId=&state=&requestKeys=&limit=50` | `{messages}`, newest first. `requestKeys` is comma-separated or repeated, at most 100; a key cancelled before it arrived comes back as `cancelled`. |
 | `POST /v1/tenants/:org/messages/:requestKey/cancel` | Withdraws a message not yet claimed → `{message}`; `409 too_late` (with `detail.state`) after. An unknown key is remembered for 30 days as cancelled. |
 | `POST /v1/tenants/:org/messages/:requestKey/resolve` | `{outcome: 'sent' \| 'not_sent'}` for an `uncertain` message → `{message}`; as for replies (`409 not_uncertain`, `409 still_checking`). Sends nothing. |
 
 An outgoing message: `{id, requestKey, messageId, revision, digest,
-conversationId, channelId, state, errorCode, permission, platformMessageId,
+conversationId, channelId, approvedVia, draftId, state, errorCode, permission, platformMessageId,
 url, attemptCount, reconciling, sendAt, attemptedAt, settledAt, settledBy,
 directMessageId, resolution, notSentAllowed, updatedAt}`, the reply's view
 with the conversation in place of the post and comment. `url` is always null
@@ -371,8 +373,8 @@ conversation); `409 missing_permission` (`detail.permission`), `paused`,
 `channel_inactive`, `not_supported`, `recipient_unknown` (the platform named
 nobody to answer), `outside_window` (the person's last message is more than
 24 hours before `sendAt`; `detail.windowOpenUntil`), `rate_limited` (60 an
-hour per channel), `daily_limit` (500 a day per channel), `revision_conflict`
-and `too_late`.
+hour per channel), `daily_limit` (500 a day per channel), `revision_conflict`,
+`too_late`, and the `guard_*` codes of an automatic send.
 
 States, retries, the sweep and resolution work as for replies: the worker
 claims a due message and checks the claim just before the one request; a
@@ -386,6 +388,231 @@ text. Failure codes include `outside_window`, `missing_permission`,
 `channel_inactive`, `recipient_unavailable` (the person cannot be reached),
 `recipient_unknown`, `message_not_allowed`, `rate_limited`, `too_late`,
 `rejected` and `resolved_not_sent`.
+
+## AI answers
+
+The engine can decide, for every new direct message and comment, whether it
+needs an answer and whether that answer may go out without a person, and
+draft the answer with Claude ([ADR 0004](adr/0004-engine-drafts-replies.md)).
+It never sends a draft on its own: the control plane pulls the drafts, a
+person approves them (or the control plane's automatic approval does), and the
+approved text comes back through the usual reply and message routes, where the
+engine checks its own records again.
+
+It is off until the control plane pushes a tenant's answering settings, and it
+needs `ANTHROPIC_API_KEY` (drafting) and `LIQUID_API_KEY` (the decision); both
+are optional. Without Liquid every decision is `skipped` (a person decides);
+without Anthropic no drafts are written and items arrive without one.
+
+### Settings
+
+| Route | Purpose |
+| --- | --- |
+| `PUT /v1/tenants/:org/answering` | `{version, settings, context?}` → `{version, settings, context, enabledAt: {messages, comments}, updatedAt}`. An older version is `409 stale_version`; the same version with other values `409 version_conflict`; the same push again changes nothing. |
+| `GET /v1/tenants/:org/answering` | The stored settings, or `404 not_found`: the feature is off for the tenant. |
+
+```json
+{
+  "version": 7,
+  "settings": {
+    "enabled": false, "drafts": true, "kinds": { "messages": true, "comments": true },
+    "decisionModel": "d1.1", "decisionPrompt": "Answer questions about opening hours and shipping; never complaints.",
+    "decisionThreshold": 0.9, "noneThreshold": 0.8, "replyModel": "haiku",
+    "voice": "Warm, short, informal.", "replyContext": "We ship in the EU only.", "delaySeconds": 120,
+    "cases": [{ "id": "press", "effect": "never", "label": "Press", "authors": ["some.magazine"], "keywords": [], "channelIds": [] }]
+  },
+  "context": [{ "id": "hours", "topic": "opening_hours", "body": "Open 9-18, Monday to Saturday." }]
+}
+```
+
+Unknown fields are refused. `drafts` turns deciding and drafting on;
+`kinds` says for which items (and also gates automatic sends); `enabled`
+turns automatic sending on. `decisionModel` defaults to `d1.1`,
+`noneThreshold` to 0.8 (0.5 to 1, like `decisionThreshold`), `replyModel` to
+`haiku` (`claude-haiku-5-5`; `sonnet` and `opus` are `claude-sonnet-5-5` and
+`claude-opus-5-5`). `delaySeconds` is 60 to 86,400. A case matches when every
+condition it sets holds: `authors` (a username or name, `@` and case ignored),
+`keywords` (in the text, case and accents ignored), `channelIds` (empty: all).
+`context` holds up to 500 entries. Each kind is processed only for items first
+seen after it was last switched on (`drafts` and the kind; `enabledAt`), so
+switching on never drafts the backlog, nor what arrived while the kind was
+off.
+
+### Deciding and drafting
+
+After the conversation sync stores a person's direct message, or the comment
+reader stores a comment not written by the channel, a separate worker step
+(every 15 seconds) decides and drafts it. Direct messages are taken per
+conversation: several new messages make one item, the newest, and only while
+it is less than 24 hours old and a person at the brand has not answered since
+(the engine's own automatic sends do not count, so a follow-up to one gets
+its own decision). Comments
+are taken only under posts published at most 7 days ago.
+
+The decision is one [System One](https://docs.typesafe.ai/primitives/choice.md)
+Choice question (`answer`: `full`, `draft` or `none`) to Liquid AI, with the
+policy (`decisionPrompt`) in the instructions and the item, labelled as
+untrusted, in the state. In order:
+
+1. A `never` case matches: `review` (`case_never`), no model call.
+2. An `always` case matches: `auto` (`case_always`), no model call, unless
+   the item is flagged (`review`, `flagged`).
+3. No `LIQUID_API_KEY`: `skipped` (`no_decision_model`); no policy: `review`
+   (`no_decision_prompt`); a failed call: `skipped` (`decision_failed`).
+4. The choice is `full` with p(full) at or above `decisionThreshold`: `auto`
+   (`above_threshold`), unless flagged: a direct message with attachments is
+   `review` (`flagged`).
+5. The choice is `none` with p(none) at or above `noneThreshold`: `none`
+   (`no_reply`).
+6. Otherwise `review` (`below_threshold`).
+7. With `enabled: false`, an `auto` result keeps its numbers but is `review`
+   (`automation_off`).
+
+Every item but `none` is then drafted with `replyModel`, without tools and
+with a structured JSON answer `{needsReply, reply, language, summary, flags}`.
+The model sees the voice, `replyContext` and context entries (never the
+cases), the channel's name, and: for a direct message the conversation's
+newest 20 messages both ways; for a comment the post's caption, the comments
+above it and the channel's replies in that chain. Every text an outside
+person wrote is wrapped as escaped data (attribute values too), each capped
+at 2,000 characters. An `auto` item must be drafted and the drafting model
+must agree: without a draft it becomes `review` (`no_draft`); when the model
+says no answer is needed or raises any flag, `review` (`flagged`); with a
+draft longer than the channel takes, `review` (`draft_too_long`, and the
+draft's flags gain `too_long`). The model's `flags` are `missing_facts`,
+`sensitive`, `complaint`, `legal`, `spam`, `injection_suspected`, `personal`,
+`out_of_scope` and `unanswerable`.
+
+A newer direct-message draft supersedes the conversation's older ones that no
+automatic send has taken. Decisions and drafts are kept 180 days and go at
+once when the channel is disabled, like the messages and comments they
+answer.
+
+### Draft outbox
+
+| Route | Purpose |
+| --- | --- |
+| `GET /v1/drafts/outbox?limit=50` | `limit` 1-200. `{items}`, the drafts not yet acknowledged, oldest first, across tenants. |
+| `POST /v1/drafts/outbox/ack` | `{ids}` (1-200) → `{acknowledged}`. Unknown IDs are ignored. |
+
+```json
+{
+  "id": "…", "organizationId": "…", "kind": "message", "channelId": "…",
+  "conversationId": "…", "responseId": null, "jobId": null, "inboundExternalId": "m_…",
+  "decision": {
+    "outcome": "review", "reason": "below_threshold", "model": "d1.1",
+    "probabilities": { "full": 0.2, "draft": 0.7, "none": 0.1 }, "confidence": 0.6,
+    "caseId": null, "decisionThreshold": 0.9, "noneThreshold": 0.8, "cost": 0.0001,
+    "errorCode": null, "settingsVersion": 7
+  },
+  "draft": { "text": "…", "digest": "…", "model": "claude-haiku-5-5", "language": "en", "flags": [] },
+  "draftErrorCode": null, "superseded": false, "supersededBy": null, "supersedes": [],
+  "createdAt": "2030-01-01T10:00:00.000Z"
+}
+```
+
+`kind` is `message` (with `conversationId`) or `comment` (with `responseId`,
+and the post's `jobId`; `inboundExternalId` is then the reply's
+`parentExternalId`). `outcome` is `auto` (full), `review` (draft), `none` or
+`skipped` (treated as review). `draft` is null for `none` and when nothing
+was drafted (`draftErrorCode` says why drafting failed). `draft.digest` is the
+digest the reply or message route computes for the unedited text. A draft
+superseded after it was acknowledged comes back once more with
+`superseded: true`, but that notice can race the acknowledgement: the newer
+draft is the authoritative signal. Storing a newer engine draft for a
+conversation supersedes the older ones there (it also names them in
+`supersedes`).
+
+### Automatic sends
+
+`POST /v1/tenants/:org/messages` and `POST /v1/tenants/:org/replies` take
+`approvedVia: "automation"` with `draftId`. The engine then refuses with
+`409` and one of these codes, in this order, unless its own records allow it:
+
+| Code | Refused when |
+| --- | --- |
+| `guard_draft` | The draft is not the tenant's, or answers another conversation or comment. |
+| `guard_decision` | The draft's decision is not `auto`. |
+| `guard_settings` | The tenant's current settings do not have `enabled`, `drafts` and the kind on. |
+| `guard_revision` | The submission is not revision 1. |
+| `guard_digest` | The digest is not the draft's: the text was edited. |
+| `guard_superseded` | A newer draft superseded it. |
+| `guard_delay` | `sendAt` is earlier than the draft's creation plus `delaySeconds` (never under 60 s). |
+| `guard_used` | An automatic send already took this draft. |
+
+The 24-hour window, every cap, pause and the other checks of the route
+apply as for a person. `approvedVia: "person"` (or absent) behaves as before
+and may not name a draft; `automation` without `draftId` is `400`.
+
+### Revising a draft
+
+`POST /v1/tenants/:org/drafts/revise`, synchronous (up to about 100 s):
+
+```json
+{ "kind": "message", "conversationId": "…", "current": "The person's text, or null", "instruction": "Shorter, and mention the opening hours" }
+```
+
+`kind: "comment"` names `responseId` instead. `instruction` (1 to 2,000
+characters) is the person's and the only instruction the model follows;
+`current` is their own text, or null for a first draft on request (a reopened
+`none` item, or one that had no draft). The context is the same as for the
+engine's drafts. Returns `200 {text, model, flags}`. `422 no_draft` (with
+`detail.flags`) when the model could not write it, `422 draft_too_long` (with
+`too_long` in `detail.flags`, and `detail.maxLength` and `unit`) when the text
+is longer than the channel takes, `502 drafting_failed` when it did not
+answer, `503 drafting_unavailable` without `ANTHROPIC_API_KEY`, `409
+answering_not_configured` for a tenant without answering settings (nothing
+is sent to a model), `404 not_found` for a conversation or comment that is
+not the tenant's. The
+engine stores only an audit event, without text.
+
+## Control plane events
+
+With `CONTROL_PLANE_EVENTS_URL` set, the engine tells the control plane when a
+pull is due ([ADR 0005](adr/0005-events-to-the-control-plane.md)). An event
+carries no content to trust, only "something changed for this organization":
+the control plane pulls over the routes above, and its scheduled pull stays
+the backstop. Unset, nothing is sent. The URL is `https:` to any host, or
+`http:` on a loopback address only (unlike tenant webhooks, private hosts are
+allowed: the operator sets it).
+
+| Type | After | The control plane pulls |
+| --- | --- | --- |
+| `drafts.available` | A decision and draft were stored | `GET /v1/drafts/outbox` |
+| `messages.changed` | An outgoing message became `sent`, `failed`, `uncertain` or was cancelled by a pause | `GET /v1/tenants/:org/messages` |
+| `replies.changed` | The same for a comment reply | `GET /v1/tenants/:org/replies` |
+
+Each is a `POST` with a JSON body and these headers:
+
+```text
+body                 {"id": "<uuid>", "type": "<type>", "at": "<ISO-8601>", "organizationId": "<org>", "data": {}}
+x-comune-event-id    <the body's id>
+x-comune-timestamp   <unix seconds>
+x-comune-signature   v1=<hex HMAC-SHA256(key, "<timestamp>.<raw body>")>
+key                  HKDF-SHA256(ikm = SERVICE_TOKEN, salt = "comune-engine-events-v1", info = "social", 32 bytes)
+```
+
+Both sides derive the key from the service token; there is nothing new to
+configure. A receiver checks the signature over the raw body in constant
+time, refuses a timestamp more than 300 s off, and answers `2xx` quickly.
+Test vector (`signControlEvent` in `src/control-events.ts`):
+
+```text
+SERVICE_TOKEN  example-service-token-0123456789abcdef
+key            0138797f9bedc5a05c0c33a151d397d505326dbedef60b56f50305b92c949817
+timestamp      1800000000
+body           {"id":"6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7","type":"drafts.available","at":"2027-01-15T08:00:00.000Z","organizationId":"org-example","data":{}}
+signature      51a877ba5b22068c1f7e7fecac6261ad5195349fc588fce7754b91c409468817
+```
+
+Events are queued in the transaction that made the change and sent after it
+commits, so they survive a restart. One pending event per type and
+organization: later changes join it under a new event ID. One that joins an
+event waiting out a failure sends it at once, from the first try; one that
+joins while it is on its way sends it again when that send settles. Without
+`CONTROL_PLANE_EVENTS_URL` no event rows are written. A send has 5 seconds and follows no
+redirects; a failure is tried again after 1 s, 5 s, 30 s, 2 min and 10 min,
+then dropped.
 
 ## Webhooks
 

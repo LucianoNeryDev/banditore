@@ -14,6 +14,10 @@ import { normalizeReplyText } from './platforms/reply-match.js'
 import { RateLimited, type FindReplyOutcome, type ReplyOutcome } from './platforms/types.js'
 import { permissionName, replyAvailability } from './reply-availability.js'
 import { changeChannelStatus, emitReplyOutcome } from './webhooks.js'
+import { replyDigest } from './digests.js'
+import { approvalFields, approvalRefinement, approvalRefinementMessage, checkAutomation } from './answering/drafts.js'
+import { queueControlEvent } from './control-events.js'
+import type { ApprovedVia } from './db/schema.js'
 
 type Reply = typeof replies.$inferSelect
 
@@ -52,10 +56,7 @@ const reconcilesPerPass = 5
 
 export const replyRetryDelayMs = sendRetryDelayMs
 
-/** What a reply binds: the post (job), the comment answered and the exact text. The dashboard computes the same value. */
-export function replyDigest(input: { jobId: string, parentExternalId: string, text: string }) {
-  return sha256Json(['social-reply-v1', input.jobId, input.parentExternalId, input.text])
-}
+export { replyDigest }
 
 /** One key per (organization, dashboard reply, revision, digest): a second submission of it is the same reply. */
 export function replyRequestKey(organizationId: string, replyId: string, revision: number, digest: string) {
@@ -76,7 +77,8 @@ export const replySubmissionSchema = z.strictObject({
   approvedByUserId: identifier,
   approvedAt: z.iso.datetime({ offset: true }),
   sendAt: z.iso.datetime({ offset: true }),
-})
+  ...approvalFields,
+}).refine(approvalRefinement, approvalRefinementMessage)
 export type ReplySubmission = z.infer<typeof replySubmissionSchema>
 
 /** Submission and cancellation of one request key serialize on it, so a cancel that finds nothing leaves a tombstone a late submission sees. */
@@ -93,6 +95,9 @@ export interface ReplyView {
   channelId: string | null
   parentExternalId: string | null
   targetExternalId: string | null
+  /** `person`, or `automation` with the engine draft it sends. */
+  approvedVia: ApprovedVia | null
+  draftId: string | null
   state: ReplyState
   errorCode: string | null
   /** The permission a `missing_permission` failure names. */
@@ -123,7 +128,8 @@ export function notSentAllowed(reply: Pick<Reply, 'state' | 'reconciling' | 'rec
 export function replyView(reply: Reply, responseId: string | null = null): ReplyView {
   return {
     id: reply.id, requestKey: reply.requestKey, replyId: reply.replyId, revision: reply.revision, digest: reply.digest, jobId: reply.jobId,
-    channelId: reply.channelId, parentExternalId: reply.parentExternalId, targetExternalId: reply.targetExternalId, state: reply.state,
+    channelId: reply.channelId, parentExternalId: reply.parentExternalId, targetExternalId: reply.targetExternalId, approvedVia: reply.approvedVia,
+    draftId: reply.draftId, state: reply.state,
     errorCode: reply.errorCode, permission: reply.permission ? permissionName(reply.permission) : null, platformReplyId: reply.platformReplyId,
     url: reply.url, attemptCount: reply.attemptCount, reconciling: reply.reconciling, sendAt: reply.sendAt.toISOString(),
     attemptedAt: reply.attemptedAt?.toISOString() ?? null, settledAt: reply.settledAt?.toISOString() ?? null, settledBy: reply.settledBy ?? null,
@@ -136,7 +142,8 @@ function tombstoneView(row: typeof replyCancellations.$inferSelect, input?: Repl
   const at = row.createdAt.toISOString()
   return {
     id: null, requestKey: row.requestKey, replyId: input?.replyId ?? null, revision: input?.revision ?? null, digest: input?.digest ?? null,
-    jobId: input?.jobId ?? null, channelId: null, parentExternalId: input?.parentExternalId ?? null, targetExternalId: null, state: 'cancelled',
+    jobId: input?.jobId ?? null, channelId: null, parentExternalId: input?.parentExternalId ?? null, targetExternalId: null,
+    approvedVia: input ? input.approvedVia ?? 'person' : null, draftId: input?.draftId ?? null, state: 'cancelled',
     errorCode: 'cancelled_before_submit', permission: null, platformReplyId: null, url: null, attemptCount: 0, reconciling: false,
     sendAt: input ? new Date(input.sendAt).toISOString() : null, attemptedAt: null, settledAt: at, settledBy: null, responseId: null, resolution: null,
     notSentAllowed: false, updatedAt: at,
@@ -219,6 +226,7 @@ export async function submitReply(context: EngineContext, organizationId: string
   if (replyRequestKey(organizationId, input.replyId, input.revision, digest) !== input.requestKey) throw invalid('request_key_mismatch', 'Unexpected request key')
   const sendAt = new Date(input.sendAt)
   if (sendAt.getTime() < Date.parse(input.approvedAt)) throw invalid('invalid_send_at', 'sendAt must not be before approvedAt')
+  const approvedVia: ApprovedVia = input.approvedVia ?? 'person'
   return context.db.transaction(async (transaction) => {
     const now = clock(context)
     await lockRequestKey(transaction, organizationId, input.requestKey)
@@ -227,7 +235,7 @@ export async function submitReply(context: EngineContext, organizationId: string
       const same = existing.organizationId === organizationId && existing.replyId === input.replyId && existing.revision === input.revision
         && existing.jobId === input.jobId && existing.parentExternalId === input.parentExternalId && existing.text === input.text
         && existing.approvedByUserId === input.approvedByUserId && existing.approvedAt.getTime() === Date.parse(input.approvedAt)
-        && existing.sendAt.getTime() === sendAt.getTime()
+        && existing.sendAt.getTime() === sendAt.getTime() && existing.approvedVia === approvedVia && existing.draftId === (input.draftId ?? null)
       if (!same) throw conflict('revision_conflict', 'This request key was already submitted with other values')
       return { reply: replyView(existing, await responseIdOf(transaction, existing)), created: false }
     }
@@ -241,6 +249,11 @@ export async function submitReply(context: EngineContext, organizationId: string
     // Late: it would leave at once, with no time left to cancel it.
     if (now.getTime() - sendAt.getTime() > maxSubmissionLatenessMs) {
       throw conflict('too_late', 'The reply arrived more than five minutes after its send time; approve it again', { maxLatenessMs: maxSubmissionLatenessMs })
+    }
+    // An automatic send of an engine draft: the engine's own records must allow it (ADR 0004).
+    if (approvedVia === 'automation') {
+      await checkAutomation(transaction, organizationId, { kind: 'comment', jobId: input.jobId, parentExternalId: input.parentExternalId,
+        draftId: input.draftId!, revision: input.revision, digest, sendAt })
     }
 
     const [job] = await transaction.select().from(jobs).where(and(eq(jobs.organizationId, organizationId), eq(jobs.id, input.jobId))).limit(1)
@@ -282,10 +295,11 @@ export async function submitReply(context: EngineContext, organizationId: string
     const [created] = await transaction.insert(replies).values({
       organizationId, channelId: channel.id, jobId: job.id, requestKey: input.requestKey, replyId: input.replyId, revision: input.revision, digest,
       parentExternalId: input.parentExternalId, targetExternalId: thread.target, targetResolved: thread.resolved, text: input.text, approvedByUserId: input.approvedByUserId,
-      approvedAt: new Date(input.approvedAt), sendAt, notBefore: new Date(Math.max(now.getTime(), sendAt.getTime())), createdAt: now, updatedAt: now,
+      approvedAt: new Date(input.approvedAt), approvedVia, draftId: input.draftId ?? null, sendAt, notBefore: new Date(Math.max(now.getTime(), sendAt.getTime())), createdAt: now, updatedAt: now,
     }).returning()
     await recordEvent(transaction, { organizationId, kind: 'reply.queued', jobId: job.id, channelId: channel.id,
-      detail: { replyId: input.replyId, revision: input.revision, approvedByUserId: input.approvedByUserId } })
+      detail: { replyId: input.replyId, revision: input.revision, approvedByUserId: input.approvedByUserId, approvedVia,
+        ...(input.draftId ? { draftId: input.draftId } : {}) } })
     return { reply: replyView(created!), created: true }
   })
 }
@@ -534,6 +548,7 @@ export async function settleReply(context: EngineContext, claimed: ClaimedReply,
       detail: outcome.kind === 'sent' ? { platformReplyId: outcome.externalId } : { code: outcome.code } })
     // A reply a person already said was sent is not announced twice.
     if ((values.state === 'sent' || values.state === 'failed') && reply.state !== values.state) await emitReplyOutcome(transaction, reply.id, now)
+    else if (values.state === 'uncertain') await queueControlEvent(transaction, 'replies.changed', reply.organizationId, now)
   })
 }
 
@@ -549,6 +564,7 @@ export async function sweepReplies(context: EngineContext) {
         notBefore: new Date(Math.max(now.getTime(), first)), updatedAt: now }).where(eq(replies.id, reply.id))
       await recordEvent(transaction, { organizationId: reply.organizationId, kind: 'reply.uncertain', jobId: reply.jobId, channelId: reply.channelId,
         detail: { reason: 'abandoned' } })
+      await queueControlEvent(transaction, 'replies.changed', reply.organizationId, now)
     }
     return open.map(reply => reply.id)
   })
