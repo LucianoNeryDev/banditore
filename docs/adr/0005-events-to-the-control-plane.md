@@ -29,7 +29,9 @@ now for this organization".
 - Events are written to a `control_events` table in the transaction that
   made the change, one row per (type, organization), and sent after the
   commit: they coalesce, and survive a restart. A change that joins a row
-  while it is being sent gets a new event ID and is sent again.
+  gets a new event ID: it is sent at once when the row waits out a failure,
+  and again after the send that is on its way. Without a URL no rows are
+  written.
 - A send has 5 s and follows no redirects; failures are retried after 1 s,
   5 s, 30 s, 2 min and 10 min, then dropped: the scheduled pull covers it.
 

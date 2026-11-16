@@ -408,7 +408,7 @@ without Anthropic no drafts are written and items arrive without one.
 
 | Route | Purpose |
 | --- | --- |
-| `PUT /v1/tenants/:org/answering` | `{version, settings, context?}` → `{version, settings, context, draftsEnabledAt, updatedAt}`. An older version is `409 stale_version`; the same version with other values `409 version_conflict`; the same push again changes nothing. |
+| `PUT /v1/tenants/:org/answering` | `{version, settings, context?}` → `{version, settings, context, enabledAt: {messages, comments}, updatedAt}`. An older version is `409 stale_version`; the same version with other values `409 version_conflict`; the same push again changes nothing. |
 | `GET /v1/tenants/:org/answering` | The stored settings, or `404 not_found`: the feature is off for the tenant. |
 
 ```json
@@ -433,9 +433,10 @@ turns automatic sending on. `decisionModel` defaults to `d1.1`,
 `claude-opus-5-5`). `delaySeconds` is 60 to 86,400. A case matches when every
 condition it sets holds: `authors` (a username or name, `@` and case ignored),
 `keywords` (in the text, case and accents ignored), `channelIds` (empty: all).
-`context` holds up to 500 entries. Only items first seen after `drafts` was
-last switched on are processed (`draftsEnabledAt`), so switching on never
-drafts the backlog.
+`context` holds up to 500 entries. Each kind is processed only for items first
+seen after it was last switched on (`drafts` and the kind; `enabledAt`), so
+switching on never drafts the backlog, nor what arrived while the kind was
+off.
 
 ### Deciding and drafting
 
@@ -443,7 +444,9 @@ After the conversation sync stores a person's direct message, or the comment
 reader stores a comment not written by the channel, a separate worker step
 (every 15 seconds) decides and drafts it. Direct messages are taken per
 conversation: several new messages make one item, the newest, and only while
-it is less than 24 hours old and the channel has not answered since. Comments
+it is less than 24 hours old and a person at the brand has not answered since
+(the engine's own automatic sends do not count, so a follow-up to one gets
+its own decision). Comments
 are taken only under posts published at most 7 days ago.
 
 The decision is one [System One](https://docs.typesafe.ai/primitives/choice.md)
@@ -456,8 +459,9 @@ untrusted, in the state. In order:
    the item is flagged (`review`, `flagged`).
 3. No `LIQUID_API_KEY`: `skipped` (`no_decision_model`); no policy: `review`
    (`no_decision_prompt`); a failed call: `skipped` (`decision_failed`).
-4. p(full) at or above `decisionThreshold`: `auto` (`above_threshold`),
-   unless flagged: a direct message with attachments is `review` (`flagged`).
+4. The choice is `full` with p(full) at or above `decisionThreshold`: `auto`
+   (`above_threshold`), unless flagged: a direct message with attachments is
+   `review` (`flagged`).
 5. The choice is `none` with p(none) at or above `noneThreshold`: `none`
    (`no_reply`).
 6. Otherwise `review` (`below_threshold`).
@@ -470,11 +474,14 @@ The model sees the voice, `replyContext` and context entries (never the
 cases), the channel's name, and: for a direct message the conversation's
 newest 20 messages both ways; for a comment the post's caption, the comments
 above it and the channel's replies in that chain. Every text an outside
-person wrote is wrapped as escaped data, each capped at 2,000 characters. An
-`auto` item must be drafted: without a draft it becomes `review` (`no_draft`),
-and with a draft longer than the channel takes, `review` (`draft_too_long`).
-`flags` may say `missing_facts`, `sensitive`, `complaint`, `legal`, `spam`,
-`injection_suspected`, `personal`, `out_of_scope` or `unanswerable`.
+person wrote is wrapped as escaped data (attribute values too), each capped
+at 2,000 characters. An `auto` item must be drafted and the drafting model
+must agree: without a draft it becomes `review` (`no_draft`); when the model
+says no answer is needed or raises any flag, `review` (`flagged`); with a
+draft longer than the channel takes, `review` (`draft_too_long`, and the
+draft's flags gain `too_long`). The model's `flags` are `missing_facts`,
+`sensitive`, `complaint`, `legal`, `spam`, `injection_suspected`, `personal`,
+`out_of_scope` and `unanswerable`.
 
 A newer direct-message draft supersedes the conversation's older ones that no
 automatic send has taken. Decisions and drafts are kept 180 days and go at
@@ -511,8 +518,10 @@ and the post's `jobId`; `inboundExternalId` is then the reply's
 was drafted (`draftErrorCode` says why drafting failed). `draft.digest` is the
 digest the reply or message route computes for the unedited text. A draft
 superseded after it was acknowledged comes back once more with
-`superseded: true`; the newer draft names the ones it superseded in
-`supersedes`.
+`superseded: true`, but that notice can race the acknowledgement: the newer
+draft is the authoritative signal. Storing a newer engine draft for a
+conversation supersedes the older ones there (it also names them in
+`supersedes`).
 
 ### Automatic sends
 
@@ -548,9 +557,13 @@ characters) is the person's and the only instruction the model follows;
 `current` is their own text, or null for a first draft on request (a reopened
 `none` item, or one that had no draft). The context is the same as for the
 engine's drafts. Returns `200 {text, model, flags}`. `422 no_draft` (with
-`detail.flags`) when the model could not write it, `502 drafting_failed` when
-it did not answer, `503 drafting_unavailable` without `ANTHROPIC_API_KEY`,
-`404 not_found` for a conversation or comment that is not the tenant's. The
+`detail.flags`) when the model could not write it, `422 draft_too_long` (with
+`too_long` in `detail.flags`, and `detail.maxLength` and `unit`) when the text
+is longer than the channel takes, `502 drafting_failed` when it did not
+answer, `503 drafting_unavailable` without `ANTHROPIC_API_KEY`, `409
+answering_not_configured` for a tenant without answering settings (nothing
+is sent to a model), `404 not_found` for a conversation or comment that is
+not the tenant's. The
 engine stores only an audit event, without text.
 
 ## Control plane events
@@ -594,8 +607,10 @@ signature      51a877ba5b22068c1f7e7fecac6261ad5195349fc588fce7754b91c409468817
 
 Events are queued in the transaction that made the change and sent after it
 commits, so they survive a restart. One pending event per type and
-organization: later changes join it (under a new event ID, and sent again if
-they arrive while it is on its way). A send has 5 seconds and follows no
+organization: later changes join it under a new event ID. One that joins an
+event waiting out a failure sends it at once, from the first try; one that
+joins while it is on its way sends it again when that send settles. Without
+`CONTROL_PLANE_EVENTS_URL` no event rows are written. A send has 5 seconds and follows no
 redirects; a failure is tried again after 1 s, 5 s, 30 s, 2 min and 10 min,
 then dropped.
 

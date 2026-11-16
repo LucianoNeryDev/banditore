@@ -24,8 +24,9 @@ approved.
 
 - **Settings.** The control plane pushes each tenant's resolved answering
   settings and preprogrammed context (`PUT /v1/tenants/:org/answering`,
-  versioned). No settings, or `drafts` off: nothing happens. Items first
-  seen before `drafts` was switched on are never processed.
+  versioned). No settings, or `drafts` off: nothing happens, and a revision
+  is refused. Items first seen before their kind was switched on are never
+  processed.
 - **A separate step.** The readers (conversation sync, comment reader) are
   unchanged: they store what they read and nothing else. A worker step that
   runs on its own schedule, after their commits, picks up new inbound rows
@@ -39,7 +40,9 @@ approved.
   `auto`. No key or a failed call is `skipped`: a person decides.
 - **Draft.** Claude (Haiku 5.5 by default) with no tools and a structured
   JSON answer. Untrusted text is wrapped as escaped data; the brand's voice
-  and context come from the control plane. `none` items get no draft.
+  and context come from the control plane. `none` items get no draft. A
+  cleared item whose draft is empty, unneeded or flagged by the drafting
+  model goes to a person.
 - **Approval stays in the control plane.** The control plane pulls the
   drafts (`/v1/drafts/outbox`), shows them, and approves them through a person
   or its own automatic approval. An automatic approval is submitted through
