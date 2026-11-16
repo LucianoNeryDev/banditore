@@ -1,0 +1,49 @@
+# Checks only: lint, typecheck, tests, build and a secret scan. No secrets,
+# no deploys.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: docker
+    timeout-minutes: 30
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@v4
+
+      - name: Install
+        run: |
+          npm install --global pnpm@10.15.0
+          pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+  secret-scan:
+    runs-on: docker
+    timeout-minutes: 10
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@v4
+
+      - name: Scan the tree with gitleaks
+        run: |
+          version=8.30.1
+          sha256=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+          tmp=$(mktemp -d)
+          archive="gitleaks_${version}_linux_x64.tar.gz"
+          curl -fsSL -o "$tmp/$archive" "https://github.com/gitleaks/gitleaks/releases/download/v${version}/${archive}"
+          echo "${sha256}  $tmp/$archive" | sha256sum -c -
+          mkdir "$tmp/gitleaks"
+          tar -xzf "$tmp/$archive" -C "$tmp/gitleaks" gitleaks
+          "$tmp/gitleaks/gitleaks" dir . --redact --no-banner --exit-code 1
