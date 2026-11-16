@@ -141,8 +141,8 @@ export function buildDecisionRequest(settings: AnsweringSettings, context: Answe
  * Decides one inbound item, in the order of the spec: a `never` case keeps it
  * for a person; an `always` case answers it without asking (unless flagged);
  * without a decision model it is `skipped`; otherwise the model is asked one
- * Choice question (full, draft, none). `full` at or above the threshold is
- * `auto` unless flagged; `none` at or above the none threshold is `none`;
+ * Choice question (full, draft, none). A `full` choice with p(full) at or
+ * above the threshold is `auto` unless flagged; `none` at or above the none threshold is `none`;
  * everything else is `review`. A failed call is `skipped`. With automatic
  * sending off, an `auto` result keeps its numbers but becomes `review`.
  */
@@ -171,7 +171,8 @@ async function decideRaw(input: { settings: AnsweringSettings, context: Answerin
     return { ...base, outcome: 'skipped', reason: 'decision_failed', errorCode: error instanceof DecisionError ? error.code : 'error' }
   }
   const asked = { ...base, model: answer.model, probabilities: answer.probabilities, confidence: answer.confidence, cost: answer.cost ?? null }
-  if (answer.probabilities.full >= settings.decisionThreshold) {
+  // Only the model's own choice of `full`, at or above the threshold, clears an item.
+  if (answer.choice === 'full' && answer.probabilities.full >= settings.decisionThreshold) {
     return { ...asked, outcome: input.flagged ? 'review' : 'auto', reason: input.flagged ? 'flagged' : 'above_threshold' }
   }
   if (answer.choice === 'none' && answer.probabilities.none >= settings.noneThreshold) return { ...asked, outcome: 'none', reason: 'no_reply' }

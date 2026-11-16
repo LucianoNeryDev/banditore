@@ -28,17 +28,29 @@ export function signControlEvent(key: Buffer, timestamp: number, body: string) {
   return createHmac('sha256', key).update(`${timestamp}.${body}`).digest('hex')
 }
 
+let enabled = false
+
+/** Events are queued only while a control plane listens (`CONTROL_PLANE_EVENTS_URL`); without one nothing is written. Set once at start. */
+export function enableControlEvents(value: boolean) {
+  enabled = value
+}
+
 /**
  * Queues an event in the caller's transaction, so it exists exactly when its
  * change commits; it is sent after the commit. One row per (type,
  * organization): a pending one absorbs the new change, under a new event ID
- * and generation, so a send already on its way does not settle it.
+ * and generation. A row waiting out a failure starts again from the first
+ * try, at once; one on its way is sent again when that send settles.
  */
 export async function queueControlEvent(executor: Executor, type: ControlEventType, organizationId: string, now: Date) {
+  if (!enabled) return
+  const inFlight = sql`coalesce(${controlEvents.claimedUntil} > ${now}::timestamptz, false)`
   await executor.insert(controlEvents).values({ type, organizationId, eventId: randomUUID(), generation: 1, attemptCount: 0, nextAttemptAt: now,
     createdAt: now, updatedAt: now })
     .onConflictDoUpdate({ target: [controlEvents.type, controlEvents.organizationId], set: {
       eventId: sql`gen_random_uuid()`, generation: sql`${controlEvents.generation} + 1`, updatedAt: now,
+      attemptCount: sql`case when ${inFlight} then ${controlEvents.attemptCount} else 0 end`,
+      nextAttemptAt: sql`case when ${inFlight} then ${controlEvents.nextAttemptAt} else least(${controlEvents.nextAttemptAt}, ${now}::timestamptz) end`,
     } })
 }
 
@@ -84,7 +96,8 @@ export async function deliverControlEvents(context: EngineContext, target: { url
     const due = await transaction.select().from(controlEvents).where(lte(controlEvents.nextAttemptAt, now))
       .orderBy(asc(controlEvents.nextAttemptAt)).limit(batchSize).for('update', { skipLocked: true })
     for (const row of due) {
-      await transaction.update(controlEvents).set({ attemptCount: row.attemptCount + 1, nextAttemptAt: new Date(now.getTime() + claimLeaseMs), updatedAt: now })
+      const leaseEnd = new Date(now.getTime() + claimLeaseMs)
+      await transaction.update(controlEvents).set({ attemptCount: row.attemptCount + 1, nextAttemptAt: leaseEnd, claimedUntil: leaseEnd, updatedAt: now })
         .where(and(eq(controlEvents.type, row.type), eq(controlEvents.organizationId, row.organizationId)))
     }
     return due.map(row => ({ ...row, attemptCount: row.attemptCount + 1 }))
@@ -111,14 +124,17 @@ async function settleControlEvent(context: EngineContext, row: Row, ok: boolean)
     const [deleted] = await context.db.delete(controlEvents).where(unchanged).returning({ type: controlEvents.type })
     if (!deleted) {
       // A change joined while this one was sent: it goes out again, as a fresh event.
-      await context.db.update(controlEvents).set({ attemptCount: 0, nextAttemptAt: now, updatedAt: now }).where(key)
+      await context.db.update(controlEvents).set({ attemptCount: 0, nextAttemptAt: now, claimedUntil: null, updatedAt: now }).where(key)
     } else if (!ok) {
       log('warn', 'control event dropped', { type: row.type, organizationId: row.organizationId, attempts: row.attemptCount })
     }
     return
   }
-  await context.db.update(controlEvents).set({ nextAttemptAt: new Date(now.getTime() + controlEventRetryDelaysMs[row.attemptCount - 1]!), updatedAt: now })
-    .where(key)
+  // A change that joined while this failed send was on its way is a new fact: it goes out at once, from the first try.
+  await context.db.update(controlEvents).set({ claimedUntil: null, updatedAt: now,
+    attemptCount: sql`case when ${controlEvents.generation} = ${row.generation} then ${controlEvents.attemptCount} else 0 end`,
+    nextAttemptAt: sql`case when ${controlEvents.generation} = ${row.generation} then ${new Date(now.getTime() + controlEventRetryDelaysMs[row.attemptCount - 1]!)}::timestamptz
+      else ${now}::timestamptz end` }).where(key)
 }
 
 /** Polls for due events every second; one pass at a time. */

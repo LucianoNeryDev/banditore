@@ -1,5 +1,5 @@
 {
-  "id": "2da1be35-06e9-4bde-8e41-b69435ced89c",
+  "id": "10c4b895-f88b-4aab-a193-7e1fd3e8fd02",
   "prevId": "1eda952a-e28c-4bfc-9bfc-a2e9a0f1d837",
   "version": "7",
   "dialect": "postgresql",
@@ -33,8 +33,14 @@
           "notNull": true,
           "default": "'[]'::jsonb"
         },
-        "drafts_enabled_at": {
-          "name": "drafts_enabled_at",
+        "messages_enabled_at": {
+          "name": "messages_enabled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "comments_enabled_at": {
+          "name": "comments_enabled_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -887,6 +893,12 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true
+        },
+        "claimed_until": {
+          "name": "claimed_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",

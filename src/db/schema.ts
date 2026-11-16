@@ -772,8 +772,9 @@ export const answeringSettings = pgTable('answering_settings', {
   version: integer('version').notNull(),
   settings: jsonb('settings').$type<AnsweringSettings>().notNull(),
   context: jsonb('context').$type<AnsweringContextEntry[]>().notNull().default([]),
-  // When `drafts` was last switched on: inbound items first seen before it are never processed.
-  draftsEnabledAt: timestamp('drafts_enabled_at', { withTimezone: true }),
+  // When DMs and comments were last switched on (`drafts` and the kind): items of that kind first seen before it are never processed.
+  messagesEnabledAt: timestamp('messages_enabled_at', { withTimezone: true }),
+  commentsEnabledAt: timestamp('comments_enabled_at', { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, () => [
@@ -858,6 +859,8 @@ export const controlEvents = pgTable('control_events', {
   generation: integer('generation').notNull().default(1),
   attemptCount: integer('attempt_count').notNull().default(0),
   nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull(),
+  // Set while a sender has it on its way; a change that joins then waits for that send to settle.
+  claimedUntil: timestamp('claimed_until', { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, table => [

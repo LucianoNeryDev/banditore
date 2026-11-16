@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm'
 import { clock, recordEvent, type EngineContext } from '../context.js'
 import type { Executor } from '../db/client.js'
 import {
@@ -7,10 +7,10 @@ import {
 } from '../db/schema.js'
 import { queueControlEvent } from '../control-events.js'
 import { errorFields, log } from '../log.js'
-import { messageDigest } from '../messages.js'
-import { replyDigest } from '../replies.js'
+import { messageDigest, replyDigest } from '../digests.js'
 import { decide, type Decision, type DecisionItem } from './decision.js'
-import { DraftError, draftFits, draftLimits, type DraftInput, type DraftOutput, type HistoryMessage, type ThreadItem } from './drafting.js'
+import { lockAnswering } from './settings.js'
+import { DraftError, draftFits, draftFlags, draftLimits, tooLongFlag, type DraftInput, type DraftOutput, type HistoryMessage, type ThreadItem } from './drafting.js'
 
 // The answering step: decide, then draft, for inbound DMs and comments the
 // readers stored. It runs in its own worker pass, after the readers committed,
@@ -29,7 +29,7 @@ const messageWindowMs = dayMs
 /** At most this many ancestors of a comment are read. */
 const maxThreadDepth = 10
 
-type Tenant = typeof answeringSettings.$inferSelect & { draftsEnabledAt: Date }
+type Tenant = typeof answeringSettings.$inferSelect
 
 interface MessageCandidate {
   kind: 'message'
@@ -53,26 +53,30 @@ function platformsWith(context: EngineContext, capability: 'sendMessage' | 'repl
 
 /**
  * New direct messages to answer: per conversation, the person's newest
- * message, first seen after `drafts` was switched on and sent within the
- * answering window, that has no decision yet and that the brand has not
- * answered since. Several new messages in one conversation make one item:
- * the newest (coalescing).
+ * message, first seen after DMs were switched on and sent within the
+ * answering window, that has no decision yet and that a person at the brand
+ * has not answered since. The engine's own automatic sends do not count as
+ * that answer: a follow-up to one gets its own decision. Several new
+ * messages in one conversation make one item: the newest (coalescing).
  */
 export async function messageCandidates(context: EngineContext, tenant: Tenant, now: Date, limit: number): Promise<MessageCandidate[]> {
   const platforms = platformsWith(context, 'sendMessage')
-  if (!platforms.length) return []
+  const since = tenant.messagesEnabledAt
+  if (!platforms.length || !since) return []
   const newest = context.db.selectDistinctOn([directMessages.conversationId], { id: directMessages.id, conversationId: directMessages.conversationId,
     externalId: directMessages.externalId, sentAt: directMessages.sentAt, firstSeenAt: directMessages.firstSeenAt })
     .from(directMessages)
     .where(and(eq(directMessages.organizationId, tenant.organizationId), eq(directMessages.direction, 'in'),
-      gte(directMessages.firstSeenAt, tenant.draftsEnabledAt), gt(directMessages.sentAt, new Date(now.getTime() - messageWindowMs))))
+      gte(directMessages.firstSeenAt, since), gt(directMessages.sentAt, new Date(now.getTime() - messageWindowMs))))
     .orderBy(directMessages.conversationId, desc(directMessages.sentAt), desc(directMessages.id)).as('newest')
   const rows = await context.db.select({ id: newest.id }).from(newest)
     .where(and(
       sql`not exists (select 1 from ${inboundDrafts} where ${inboundDrafts.conversationId} = ${newest.conversationId}
         and ${inboundDrafts.inboundExternalId} = ${newest.externalId} and ${inboundDrafts.kind} = 'message')`,
       sql`not exists (select 1 from ${directMessages} answered where answered.conversation_id = ${newest.conversationId}
-        and answered.direction = 'out' and answered.sent_at > ${newest.sentAt})`))
+        and answered.direction = 'out' and answered.sent_at > ${newest.sentAt}
+        and not exists (select 1 from ${outgoingMessages} engine where engine.channel_id = answered.channel_id
+          and engine.platform_message_id = answered.external_id and engine.draft_id is not null))`))
     .orderBy(asc(newest.firstSeenAt)).limit(limit)
   if (!rows.length) return []
   const found = await context.db.select({ message: directMessages, conversation: conversations, channel: channels }).from(directMessages)
@@ -84,16 +88,17 @@ export async function messageCandidates(context: EngineContext, tenant: Tenant, 
 
 /**
  * New comments to answer: written by someone other than the channel,
- * first seen after `drafts` was switched on, under a post published at most
+ * first seen after comments were switched on, under a post published at most
  * seven days ago, without a decision yet.
  */
 export async function commentCandidates(context: EngineContext, tenant: Tenant, now: Date, limit: number): Promise<CommentCandidate[]> {
   const platforms = platformsWith(context, 'reply')
-  if (!platforms.length) return []
+  const since = tenant.commentsEnabledAt
+  if (!platforms.length || !since) return []
   const rows = await context.db.select({ response: postResponses, job: jobs, channel: channels }).from(postResponses)
     .innerJoin(jobs, eq(jobs.id, postResponses.jobId)).innerJoin(channels, eq(channels.id, postResponses.channelId))
     .where(and(eq(postResponses.organizationId, tenant.organizationId), eq(postResponses.fromChannel, false),
-      gte(postResponses.firstSeenAt, tenant.draftsEnabledAt), gte(jobs.publishAt, new Date(now.getTime() - commentPostAgeMs)),
+      gte(postResponses.firstSeenAt, since), gte(jobs.publishAt, new Date(now.getTime() - commentPostAgeMs)),
       eq(jobs.state, 'published'), eq(channels.status, 'active'), inArray(channels.platform, platforms),
       sql`not exists (select 1 from ${inboundDrafts} where ${inboundDrafts.responseId} = ${postResponses.id} and ${inboundDrafts.kind} = 'comment')`))
     .orderBy(asc(postResponses.firstSeenAt), asc(postResponses.id)).limit(limit)
@@ -158,13 +163,28 @@ settings: Pick<AnsweringSettings, 'voice' | 'replyContext'> | null, entries: Ans
 interface Drafted {
   decision: Decision
   draft: { text: string, model: string, output: DraftOutput } | null
+  /** The drafting model's flags, kept even when it wrote no text, plus `too_long` when the channel cannot take the text. */
+  flags: string[]
   draftErrorCode: string | null
 }
 
 /**
+ * What a draft says against an automatic send: no text (`no_draft`), the
+ * drafting model's own judgement that no answer is needed or any of its
+ * flags (`flagged`), or a text the channel cannot take (`draft_too_long`).
+ * Null when the draft may go out unseen.
+ */
+export function draftObjection(output: Pick<DraftOutput, 'reply' | 'needsReply' | 'flags'>, maxLength: DraftInput['maxLength']) {
+  if (!output.reply) return 'no_draft' as const
+  if (!output.needsReply || output.flags.some(flag => (draftFlags as readonly string[]).includes(flag))) return 'flagged' as const
+  if (!draftFits(maxLength, output.reply)) return 'draft_too_long' as const
+  return null
+}
+
+/**
  * Decides an item, then drafts it unless the decision is `none`. Without a
- * drafting model there is no draft. A cleared (`auto`) item without a usable
- * draft goes to a person (`no_draft`, `draft_too_long`).
+ * drafting model there is no draft. A cleared (`auto`) item goes to a person
+ * when the draft objects (`no_draft`, `flagged`, `draft_too_long`).
  */
 async function decideAndDraft(context: EngineContext, candidate: Candidate): Promise<Drafted> {
   const { settings, context: entries } = candidate.tenant
@@ -176,9 +196,9 @@ async function decideAndDraft(context: EngineContext, candidate: Candidate): Pro
       author: { name: candidate.response.authorName, handle: candidate.response.authorHandle }, text: candidate.response.text, attachments: [],
       post: candidate.job.payload.content }
   let decision = await decide({ settings, context: entries, item, flagged: item.attachments.length > 0, model: context.decisionModel })
-  if (decision.outcome === 'none') return { decision, draft: null, draftErrorCode: null }
+  if (decision.outcome === 'none') return { decision, draft: null, flags: [], draftErrorCode: null }
   if (!context.draftModel) {
-    return { decision: decision.outcome === 'auto' ? { ...decision, outcome: 'review', reason: 'no_draft' } : decision, draft: null, draftErrorCode: null }
+    return { decision: decision.outcome === 'auto' ? { ...decision, outcome: 'review', reason: 'no_draft' } : decision, draft: null, flags: [], draftErrorCode: null }
   }
   const input = await draftInputFor(context, candidate.kind === 'message'
     ? { kind: 'message', channel: candidate.channel, conversationId: candidate.conversation.id, upTo: candidate.message.sentAt }
@@ -186,13 +206,15 @@ async function decideAndDraft(context: EngineContext, candidate: Candidate): Pro
   try {
     const result = await context.draftModel.draft(input, settings.replyModel)
     const text = result.output.reply
-    if (decision.outcome === 'auto' && !text) decision = { ...decision, outcome: 'review', reason: 'no_draft' }
-    else if (decision.outcome === 'auto' && text && !draftFits(input.maxLength, text)) decision = { ...decision, outcome: 'review', reason: 'draft_too_long' }
-    return { decision, draft: text ? { text, model: result.model, output: result.output } : null, draftErrorCode: null }
+    const objection = draftObjection(result.output, input.maxLength)
+    if (decision.outcome === 'auto' && objection) decision = { ...decision, outcome: 'review', reason: objection }
+    // A text the channel cannot take says so, for the person who edits it.
+    const flags = text && !draftFits(input.maxLength, text) ? [...result.output.flags, tooLongFlag] : result.output.flags
+    return { decision, draft: text ? { text, model: result.model, output: result.output } : null, flags, draftErrorCode: null }
   } catch (error) {
     log('warn', 'drafting failed', { kind: candidate.kind, channelId: candidate.channel.id, ...errorFields(error) })
     if (decision.outcome === 'auto') decision = { ...decision, outcome: 'review', reason: 'no_draft' }
-    return { decision, draft: null, draftErrorCode: error instanceof DraftError ? error.code : 'error' }
+    return { decision, draft: null, flags: [], draftErrorCode: error instanceof DraftError ? error.code : 'error' }
   }
 }
 
@@ -204,6 +226,8 @@ async function decideAndDraft(context: EngineContext, candidate: Candidate): Pro
  */
 async function storeDraft(context: EngineContext, candidate: Candidate, drafted: Drafted) {
   return context.db.transaction(async transaction => {
+    // Under the settings lock the automatic-send guards take, so a supersede and an automatic submission of the older draft serialize.
+    await lockAnswering(transaction, candidate.tenant.organizationId)
     const now = clock(context)
     const { decision, draft } = drafted
     const digest = !draft ? null : candidate.kind === 'message'
@@ -217,7 +241,7 @@ async function storeDraft(context: EngineContext, candidate: Candidate, drafted:
       outcome: decision.outcome, reason: decision.reason, decisionModel: decision.model, probabilities: decision.probabilities,
       confidence: decision.confidence, caseId: decision.caseId, decisionThreshold: decision.decisionThreshold, noneThreshold: decision.noneThreshold,
       cost: decision.cost, errorCode: decision.errorCode, draftText: draft?.text ?? null, draftDigest: digest, draftModel: draft?.model ?? null,
-      draftLanguage: draft?.output.language.slice(0, 16) ?? null, draftFlags: draft?.output.flags ?? [], draftErrorCode: drafted.draftErrorCode,
+      draftLanguage: draft?.output.language.slice(0, 16) ?? null, draftFlags: drafted.flags, draftErrorCode: drafted.draftErrorCode,
       settingsVersion: candidate.tenant.version, outboxPending: true, outboxAt: now, createdAt: now,
     }).onConflictDoNothing().returning({ id: inboundDrafts.id })
     if (!created) return null
@@ -231,16 +255,17 @@ async function storeDraft(context: EngineContext, candidate: Candidate, drafted:
       detail: { draftId: created.id, kind: candidate.kind, outcome: decision.outcome, reason: decision.reason, model: decision.model,
         probabilities: decision.probabilities, confidence: decision.confidence, caseId: decision.caseId, cost: decision.cost,
         errorCode: decision.errorCode, drafted: Boolean(draft), draftModel: draft?.model ?? null, draftErrorCode: drafted.draftErrorCode,
-        flags: draft?.output.flags ?? [], settingsVersion: candidate.tenant.version } })
+        flags: drafted.flags, settingsVersion: candidate.tenant.version } })
     await queueControlEvent(transaction, 'drafts.available', candidate.tenant.organizationId, now)
     return created.id
   })
 }
 
-/** Tenants whose settings have `drafts` on. */
+/** Tenants with DMs or comments switched on. */
 async function activeTenants(context: EngineContext): Promise<Tenant[]> {
-  const rows = await context.db.select().from(answeringSettings).where(isNotNull(answeringSettings.draftsEnabledAt))
-  return rows.filter((row): row is Tenant => row.draftsEnabledAt !== null && row.settings.drafts)
+  const rows = await context.db.select().from(answeringSettings)
+    .where(or(isNotNull(answeringSettings.messagesEnabledAt), isNotNull(answeringSettings.commentsEnabledAt)))
+  return rows.filter(row => row.settings.drafts)
 }
 
 /** One pass: decide and draft up to `limit` new inbound items, oldest first, across tenants. */

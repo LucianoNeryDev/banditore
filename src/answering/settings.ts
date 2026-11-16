@@ -62,7 +62,8 @@ export interface StoredAnswering {
   version: number
   settings: AnsweringSettings
   context: AnsweringContextEntry[]
-  draftsEnabledAt: Date | null
+  messagesEnabledAt: Date | null
+  commentsEnabledAt: Date | null
   updatedAt: Date
 }
 
@@ -85,7 +86,8 @@ export async function readAnswering(executor: Executor, organizationId: string):
 }
 
 function answeringView(row: StoredAnswering) {
-  return { version: row.version, settings: row.settings, context: row.context, draftsEnabledAt: row.draftsEnabledAt?.toISOString() ?? null,
+  return { version: row.version, settings: row.settings, context: row.context,
+    enabledAt: { messages: row.messagesEnabledAt?.toISOString() ?? null, comments: row.commentsEnabledAt?.toISOString() ?? null },
     updatedAt: row.updatedAt.toISOString() }
 }
 
@@ -98,9 +100,10 @@ export async function getAnswering(context: EngineContext, organizationId: strin
 /**
  * Stores what the dashboard pushed. Versions only move forward: an older
  * version is `stale_version`, the same version with other values
- * `version_conflict`, and the same push again changes nothing. When `drafts`
- * turns on, its time is recorded: inbound items first seen before it are
- * never processed, so switching on does not draft the backlog.
+ * `version_conflict`, and the same push again changes nothing. When DMs or
+ * comments turn on (`drafts` and the kind), that time is recorded per kind:
+ * items of the kind first seen before it are never processed, so switching
+ * on does not draft the backlog, nor what arrived while the kind was off.
  */
 export async function putAnswering(context: EngineContext, organizationId: string, input: AnsweringPut) {
   return context.db.transaction(async transaction => {
@@ -115,8 +118,11 @@ export async function putAnswering(context: EngineContext, organizationId: strin
         return answeringView(current)
       }
     }
-    const draftsEnabledAt = !input.settings.drafts ? null : current?.settings.drafts && current.draftsEnabledAt ? current.draftsEnabledAt : now
-    const values = { version: input.version, settings: input.settings, context: input.context, draftsEnabledAt, updatedAt: now }
+    // Each kind keeps the time it was switched on (with `drafts`) while it stays on; off clears it, on again starts from now.
+    const since = (kind: 'messages' | 'comments', previous: Date | null) => !(input.settings.drafts && input.settings.kinds[kind]) ? null
+      : current && current.settings.drafts && current.settings.kinds[kind] && previous ? previous : now
+    const values = { version: input.version, settings: input.settings, context: input.context, messagesEnabledAt: since('messages', current?.messagesEnabledAt ?? null),
+      commentsEnabledAt: since('comments', current?.commentsEnabledAt ?? null), updatedAt: now }
     const [stored] = await transaction.insert(answeringSettings).values({ organizationId, ...values, createdAt: now })
       .onConflictDoUpdate({ target: answeringSettings.organizationId, set: values }).returning()
     await recordEvent(transaction, { organizationId, kind: 'answering.updated', detail: { version: input.version, enabled: input.settings.enabled,

@@ -12,7 +12,7 @@ import { reviseDraft } from '../src/answering/revise.js'
 import { getAnswering, putAnswering } from '../src/answering/settings.js'
 import { disableChannel } from '../src/channels.js'
 import type { EngineContext } from '../src/context.js'
-import { controlEventKey, controlEventRetryDelaysMs, deliverControlEvents, queueControlEvent, signControlEvent, type ControlEventRequest } from '../src/control-events.js'
+import { controlEventKey, controlEventRetryDelaysMs, deliverControlEvents, enableControlEvents, queueControlEvent, signControlEvent, type ControlEventRequest } from '../src/control-events.js'
 import type { Database } from '../src/db/client.js'
 import {
   channels, controlEvents, conversations, directMessages, events, inboundDrafts, jobs, outgoingMessages, postResponses, providerApps, replies,
@@ -97,6 +97,7 @@ describe.skipIf(!required)('AI answers on PostgreSQL 17', { timeout: 60_000 }, (
     drafter = new FakeDrafter()
     context = { db, adapters: new Map([['meta', new FakePage()]]), keyring: { activeKeyId: 'k1', keys: new Map([['k1', randomBytes(32)]]) },
       providerSecrets: new Map([['meta-agency', 'agency-secret']]), now: () => now, decisionModel: decision, draftModel: drafter }
+    enableControlEvents(true)
   })
 
   const advance = (ms: number) => { now = new Date(now.getTime() + ms) }
@@ -154,17 +155,21 @@ describe.skipIf(!required)('AI answers on PostgreSQL 17', { timeout: 60_000 }, (
   it('grants the new tables to the runtime role and keeps settings versions moving forward', async () => {
     await expect(getAnswering(context, org)).rejects.toMatchObject({ status: 404 })
     const first = await put()
-    expect(first).toMatchObject({ version, draftsEnabledAt: now.toISOString(), settings: { kinds: { messages: true } }, context: [{ id: 'e1' }] })
+    expect(first).toMatchObject({ version, enabledAt: { messages: now.toISOString(), comments: now.toISOString() }, settings: { kinds: { messages: true } },
+      context: [{ id: 'e1' }] })
     const same = await putAnswering(context, org, { version, settings: baseSettings(), context: [{ id: 'e1', topic: 'shipping', body: 'Three days.' }] })
     expect(same).toEqual(first)
     await expect(putAnswering(context, org, { version, settings: baseSettings({ voice: 'Other' }), context: [] })).rejects.toMatchObject({ code: 'version_conflict' })
     await expect(putAnswering(context, org, { version: version - 1, settings: baseSettings(), context: [] })).rejects.toMatchObject({ code: 'stale_version' })
     advance(hour)
-    // Another change keeps the time drafts were switched on; switching off clears it; on again starts from now.
-    expect(await put({ voice: 'Warmer.' })).toMatchObject({ draftsEnabledAt: first.draftsEnabledAt })
-    expect(await put({ drafts: false })).toMatchObject({ draftsEnabledAt: null })
+    // Another change keeps the times; switching off clears them; on again starts from now, per kind.
+    expect(await put({ voice: 'Warmer.' })).toMatchObject({ enabledAt: first.enabledAt })
+    expect(await put({ drafts: false })).toMatchObject({ enabledAt: { messages: null, comments: null } })
     advance(hour)
-    expect(await put()).toMatchObject({ draftsEnabledAt: now.toISOString() })
+    const again = await put({ kinds: { messages: true, comments: false } })
+    expect(again).toMatchObject({ enabledAt: { messages: now.toISOString(), comments: null } })
+    advance(hour)
+    expect(await put()).toMatchObject({ enabledAt: { messages: again.enabledAt.messages, comments: now.toISOString() } })
     expect(await getAnswering(context, org)).toMatchObject({ version })
   })
 
@@ -341,6 +346,73 @@ describe.skipIf(!required)('AI answers on PostgreSQL 17', { timeout: 60_000 }, (
     expect(await db.select().from(replies)).toHaveLength(1)
   })
 
+  it('keeps for a person a cleared item whose draft objects: flags, no answer needed, no text, too long', async () => {
+    const page = await channel()
+    await put()
+    advance(minute)
+    const cases: Array<[Partial<DraftOutput>, string, string[]]> = [
+      [{ flags: ['missing_facts'] }, 'flagged', ['missing_facts']],
+      [{ flags: ['injection_suspected'] }, 'flagged', ['injection_suspected']],
+      [{ needsReply: false }, 'flagged', []],
+      [{ reply: null, flags: ['unanswerable'] }, 'no_draft', ['unanswerable']],
+      [{ reply: 'y'.repeat(201) }, 'draft_too_long', ['too_long']],
+      [{}, 'above_threshold', []],
+    ]
+    for (const [output, reason, flags] of cases) {
+      const chat = await conversation(page)
+      await message(chat, 'Please auto answer')
+      drafter.next = output
+      await runAnswering(context)
+      const [row] = await draftsOf(chat.id)
+      expect(row, reason).toMatchObject({ outcome: reason === 'above_threshold' ? 'auto' : 'review', reason, draftFlags: flags })
+    }
+  })
+
+  it('does not take the engine\'s own automatic reply for a person\'s answer: a follow-up gets its own draft', async () => {
+    const page = await channel()
+    await put()
+    advance(minute)
+    const chat = await conversation(page)
+    await message(chat, 'Please auto answer: do you ship?')
+    await runAnswering(context)
+    const [first] = await draftsOf(chat.id)
+    expect(first).toMatchObject({ outcome: 'auto' })
+    // The person writes again; the automatic reply then goes out and is read back after it, before the next pass.
+    advance(10 * second)
+    await message(chat, 'And to Portugal?')
+    const accepted = await submitMessage(context, org, automaticMessage(first!, { sendAt: new Date(first!.createdAt.getTime() + 2 * minute) }))
+    expect(accepted.created).toBe(true)
+    advance(2 * minute)
+    const sent = await message(chat, first!.draftText!, { direction: 'out' })
+    await db.update(outgoingMessages).set({ state: 'sent', platformMessageId: sent.externalId }).where(eq(outgoingMessages.draftId, first!.id))
+    expect(await runAnswering(context)).toEqual({ drafted: 1, failed: 0 })
+    const followUp = (await draftsOf(chat.id)).find(row => row.id !== first!.id)!
+    expect(followUp).toMatchObject({ draftText: 'Reply: And to Portugal?' })
+    // The draft taken by the automatic send is not superseded.
+    expect((await draftsOf(chat.id)).find(row => row.id === first!.id)).toMatchObject({ supersededBy: null })
+    // A person's reply from the platform still counts as the answer.
+    advance(minute)
+    await message(chat, 'One more: and to Malta?')
+    advance(second)
+    await message(chat, 'Yes, Malta too.', { direction: 'out' })
+    await runAnswering(context)
+    expect((await draftsOf(chat.id)).map(row => row.draftText)).not.toContain('Reply: One more: and to Malta?')
+  })
+
+  it('does not process the comments seen while comments were off', async () => {
+    const page = await channel()
+    await put({ kinds: { messages: true, comments: false } })
+    advance(minute)
+    const job = await post(page, day)
+    await comment(job, 'Seen while comments were off')
+    advance(minute)
+    await put()
+    advance(minute)
+    const fresh = await comment(job, 'Seen after')
+    expect(await runAnswering(context)).toEqual({ drafted: 1, failed: 0 })
+    expect((await db.select().from(inboundDrafts)).map(row => row.responseId)).toEqual([fresh.id])
+  })
+
   it('tells the control plane after the commit, coalesced, signed, retried and finally dropped', async () => {
     const requests: ControlEventRequest[] = []
     let answer = true
@@ -380,6 +452,25 @@ describe.skipIf(!required)('AI answers on PostgreSQL 17', { timeout: 60_000 }, (
     }
     expect(waits).toEqual(controlEventRetryDelaysMs)
     expect(await db.select().from(controlEvents)).toEqual([])
+
+    // A new change joining an event that waits out a failure goes out at once, from the first try.
+    await queueControlEvent(db, 'drafts.available', org, now)
+    await deliverControlEvents(context, target)
+    expect(await db.select().from(controlEvents)).toMatchObject([{ attemptCount: 1, nextAttemptAt: new Date(now.getTime() + controlEventRetryDelaysMs[0]!) }])
+    await queueControlEvent(db, 'drafts.available', org, now)
+    expect(await db.select().from(controlEvents)).toMatchObject([{ attemptCount: 0, nextAttemptAt: now, generation: 2 }])
+    // ...and so does one that joins while a send that fails is on its way.
+    await deliverControlEvents(context, { ...target, send: async () => {
+      await queueControlEvent(db, 'drafts.available', org, now)
+      return false
+    } })
+    expect(await db.select().from(controlEvents)).toMatchObject([{ attemptCount: 0, nextAttemptAt: now, generation: 3, claimedUntil: null }])
+
+    // Without a control plane URL nothing is written.
+    await db.delete(controlEvents)
+    enableControlEvents(false)
+    await queueControlEvent(db, 'messages.changed', org, now)
+    expect(await db.select().from(controlEvents)).toEqual([])
   })
 
   it('revises a draft for a person, storing only an event without text', async () => {
@@ -397,8 +488,15 @@ describe.skipIf(!required)('AI answers on PostgreSQL 17', { timeout: 60_000 }, (
     drafter.next = { reply: null, flags: ['unanswerable'] }
     await expect(reviseDraft(context, org, { kind: 'message', conversationId: chat.id, current: null, instruction: 'Write one' }))
       .rejects.toMatchObject({ status: 422, code: 'no_draft', detail: { flags: ['unanswerable'] } })
+    drafter.next = { reply: 'x'.repeat(201) }
+    await expect(reviseDraft(context, org, { kind: 'message', conversationId: chat.id, current: null, instruction: 'Longer' }))
+      .rejects.toMatchObject({ status: 422, code: 'draft_too_long', detail: { flags: ['too_long'], maxLength: 200 } })
+    await expect(reviseDraft(context, org, { kind: 'message', conversationId: randomUUID(), current: null, instruction: 'x' })).rejects.toMatchObject({ status: 404 })
+    // A tenant without answering settings never reaches the drafting model.
+    const calls = drafter.inputs.length
     await expect(reviseDraft(context, `org-${randomUUID()}`, { kind: 'message', conversationId: chat.id, current: null, instruction: 'x' }))
-      .rejects.toMatchObject({ status: 404 })
+      .rejects.toMatchObject({ status: 409, code: 'answering_not_configured' })
+    expect(drafter.inputs).toHaveLength(calls)
     await expect(reviseDraft({ ...context, draftModel: undefined }, org, { kind: 'message', conversationId: chat.id, current: null, instruction: 'x' }))
       .rejects.toMatchObject({ status: 503, code: 'drafting_unavailable' })
   })

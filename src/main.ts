@@ -17,9 +17,11 @@ import { MetaAdapter } from './platforms/meta/adapter.js'
 import { YoutubeAdapter } from './platforms/youtube/adapter.js'
 import { LiquidDecisionModel } from './answering/decision.js'
 import { AnthropicDraftModel } from './answering/drafting.js'
-import { ControlEventSender, controlEventKey } from './control-events.js'
+import { ControlEventSender, controlEventKey, enableControlEvents } from './control-events.js'
 
 const config = loadConfig()
+// Before anything can queue one: without a control plane URL no event rows are written.
+enableControlEvents(Boolean(config.controlPlaneEventsUrl))
 registerLogSecrets([config.serviceToken, ...config.providerSecrets.values(), ...(config.runner ? [config.runner.token] : []),
   ...(config.anthropicApiKey ? [config.anthropicApiKey] : []), ...(config.liquidApiKey ? [config.liquidApiKey] : [])])
 const { db, pool } = createDatabase(config.databaseUrl)

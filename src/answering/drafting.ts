@@ -3,6 +3,8 @@ import type { AnsweringContextEntry, DraftKind, ReplyModelChoice } from '../db/s
 
 export const draftFlags = ['missing_facts', 'sensitive', 'complaint', 'legal', 'spam', 'injection_suspected', 'personal', 'out_of_scope', 'unanswerable'] as const
 export type DraftFlag = typeof draftFlags[number]
+/** Added by the engine, never by the model: the text is longer than the channel takes. */
+export const tooLongFlag = 'too_long'
 
 /** What the drafting model returns. */
 export const draftOutputSchema = z.object({
@@ -57,6 +59,11 @@ export function block(value: string) {
   return value.replace(/</g, '‹').replace(/>/g, '›')
 }
 
+/** Escapes a value placed in a quoted attribute of those blocks, so data cannot close the quote or forge an entity. */
+export function attr(value: string) {
+  return block(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+}
+
 const clip = (value: string, length: number) => value.length > length ? `${value.slice(0, length)}[…]` : value
 
 /**
@@ -96,23 +103,23 @@ export function buildDraftPrompt(input: DraftInput) {
     if (budget <= 0) break
     const body = clip(entry.body, budget)
     budget -= body.length
-    entries.push(`<entry topic="${entry.topic}">\n${block(body)}\n</entry>`)
+    entries.push(`<entry topic="${attr(entry.topic)}">\n${block(body)}\n</entry>`)
   }
   const parts = [`<brand>\n${brand}\n</brand>`, `<context>\n${entries.join('\n') || '(none)'}\n</context>`]
 
   if (input.kind === 'message') {
     const history = (input.history ?? []).slice(-draftLimits.historyMessages)
     const lines = history.map(message => {
-      const attachments = message.attachments.length ? ` attachments="${message.attachments.map(block).join(',')}"` : ''
+      const attachments = message.attachments.length ? ` attachments="${attr(message.attachments.join(','))}"` : ''
       return `<message from="${message.direction === 'in' ? 'person' : 'brand'}" at="${message.sentAt.toISOString()}"${attachments}>\n${block(clip(message.text, draftLimits.itemCharacters))}\n</message>`
     })
     parts.push(`<conversation>\n${lines.join('\n') || '(empty)'}\n</conversation>`)
   } else {
     parts.push(`<post>\n${block(clip(input.post ?? '', draftLimits.postCharacters)) || '(no caption)'}\n</post>`)
     const thread = (input.thread ?? []).slice(-draftLimits.threadItems)
-    parts.push(`<thread>\n${thread.map(item => `<reply from="${item.fromChannel ? 'brand' : 'person'}"${item.author && !item.fromChannel ? ` author="${block(item.author)}"` : ''} at="${item.publishedAt.toISOString()}">\n${block(clip(item.text, draftLimits.itemCharacters))}\n</reply>`).join('\n') || '(none)'}\n</thread>`)
+    parts.push(`<thread>\n${thread.map(item => `<reply from="${item.fromChannel ? 'brand' : 'person'}"${item.author && !item.fromChannel ? ` author="${attr(item.author)}"` : ''} at="${item.publishedAt.toISOString()}">\n${block(clip(item.text, draftLimits.itemCharacters))}\n</reply>`).join('\n') || '(none)'}\n</thread>`)
     const comment = input.comment
-    parts.push(`<comment${comment?.author ? ` author="${block(comment.author)}"` : ''}${comment ? ` at="${comment.publishedAt.toISOString()}"` : ''}>\n${block(clip(comment?.text ?? '', draftLimits.itemCharacters))}\n</comment>`)
+    parts.push(`<comment${comment?.author ? ` author="${attr(comment.author)}"` : ''}${comment ? ` at="${comment.publishedAt.toISOString()}"` : ''}>\n${block(clip(comment?.text ?? '', draftLimits.itemCharacters))}\n</comment>`)
   }
   if (input.revise) {
     parts.push(`<current_draft>\n${input.revise.current === null ? '(none: write the first draft)' : block(input.revise.current)}\n</current_draft>`)
