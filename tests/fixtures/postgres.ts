@@ -29,7 +29,7 @@ export async function postgresFixture() {
   let port = Number(external?.port || 5432)
   const host = external?.hostname ?? '127.0.0.1'
   const pool = (user: string, database: string, secret = password) => {
-    const created = new pg.Pool({ host, port, user, password: secret, database, connectionTimeoutMillis: 2_000, max: 10 })
+    const created = new pg.Pool({ host, port, user, password: secret, database, connectionTimeoutMillis: 10_000, max: 10 })
     pools.push(created)
     return created
   }
