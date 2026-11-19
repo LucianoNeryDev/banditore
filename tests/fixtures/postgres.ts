@@ -30,6 +30,8 @@ export async function postgresFixture() {
   const host = external?.hostname ?? '127.0.0.1'
   const pool = (user: string, database: string, secret = password) => {
     const created = new pg.Pool({ host, port, user, password: secret, database, connectionTimeoutMillis: 10_000, max: 10 })
+    // A server that drops its connections at teardown must not surface as an unhandled error.
+    created.on('error', () => undefined)
     pools.push(created)
     return created
   }
