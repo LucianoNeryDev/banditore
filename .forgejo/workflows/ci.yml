@@ -1,5 +1,5 @@
-# Checks only: lint, typecheck, tests, build and a secret scan. No secrets,
-# no deploys.
+# Checks only: lint, typecheck, tests, the PostgreSQL integration tests, build
+# and a secret scan. No secrets, no deploys.
 name: ci
 
 on:
@@ -29,6 +29,35 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  integration:
+    runs-on: docker
+    timeout-minutes: 30
+    services:
+      postgres:
+        # Same pinned image as tests/fixtures/postgres.ts.
+        image: postgres:17@sha256:aa90e97ee862e558111d34cfb8b2c4bec768c2b039fb791341686928560263b3
+        env:
+          POSTGRES_PASSWORD: ci-throwaway
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      REQUIRE_DATABASE_TESTS: 'true'
+      BANDITORE_TEST_POSTGRES_URL: postgres://postgres:ci-throwaway@postgres:5432/postgres
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@v4
+
+      - name: Install
+        run: |
+          npm install --global pnpm@10.15.0
+          pnpm install --frozen-lockfile
+
+      # The suites create the same database and roles, so they run one at a time.
+      - name: Integration tests
+        run: pnpm test:db --no-file-parallelism
 
   secret-scan:
     runs-on: docker

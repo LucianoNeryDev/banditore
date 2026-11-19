@@ -71,7 +71,8 @@ See [ROADMAP.md](ROADMAP.md) for what is next and
 ## Getting started
 
 Node 22 and pnpm. The database tests start a disposable PostgreSQL 17
-container, so they need Docker.
+container, so they need Docker (or set `BANDITORE_TEST_POSTGRES_URL`, see
+[CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ```sh
 pnpm install
@@ -93,10 +94,12 @@ API your control plane calls.
 - [Running it](docs/deploy.md).
 - [Architecture decisions](docs/adr/).
 - [Roadmap](ROADMAP.md) and [changelog](CHANGELOG.md).
+- [Contributing](CONTRIBUTING.md): invariants, conventions and the checks to run before a pull request.
 
 ## Maintenance
 
-Maintained for our own needs. Issues and pull requests are welcome; changes
+Maintained for our own needs. Issues and pull requests are welcome (see
+[CONTRIBUTING.md](CONTRIBUTING.md)); changes
 that fit how we run it are the most likely to be merged, and there is no
 support commitment. Report security problems privately, as
 [SECURITY.txt](SECURITY.txt) describes.
